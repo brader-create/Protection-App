@@ -4,6 +4,74 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+const APPLIANCE_TYPES = [
+  ['refrigerat', 'Refrigerator'], ['fridge', 'Refrigerator'], ['freezer', 'Freezer'],
+  ['washer', 'Washer'], ['washing', 'Washer'], ['laundry', 'Laundry'],
+  ['dryer', 'Dryer'],
+  ['dishwasher', 'Dishwasher'],
+  ['range', 'Range'], ['stove', 'Range'], ['oven', 'Oven'], ['cooktop', 'Cooktop'],
+  ['microwave', 'Microwave'],
+  ['hood', 'Hood'], ['ventilat', 'Ventilation'],
+  ['compactor', 'Compactor'],
+  ['ice maker', 'Ice Maker'],
+  ['wine', 'Wine Cooler'], ['beverage', 'Beverage Center'],
+  ['air cond', 'Air Conditioner'],
+  ['dehumid', 'Dehumidifier'], ['humidif', 'Humidifier'],
+  ['water heater', 'Water Heater'],
+  ['dispos', 'Disposal'],
+];
+
+const BRANDS = [
+  'LG', 'Samsung', 'Whirlpool', 'GE', 'Bosch', 'KitchenAid', 'Maytag',
+  'Frigidaire', 'Electrolux', 'Miele', 'Sub-Zero', 'Wolf', 'Viking',
+  'Thermador', 'JennAir', 'Jenn-Air', 'Amana', 'Kenmore', 'Beko', 'Haier',
+  'Fisher & Paykel', 'Fisher and Paykel', 'Blomberg', 'Cafe', 'Café',
+  'Monogram', 'Profile', 'Dacor', 'Bertazzoni', 'Speed Queen', 'Asko',
+  'Hisense', 'Insignia', 'Danby', 'Panasonic', 'Sharp', 'Midea',
+];
+
+function cleanDescription(rawDesc) {
+  if (!rawDesc) return '';
+  const lower = rawDesc.toLowerCase();
+
+  let brand = '';
+  for (const b of BRANDS) {
+    if (lower.includes(b.toLowerCase())) {
+      brand = b;
+      break;
+    }
+  }
+
+  let type = '';
+  for (const [keyword, label] of APPLIANCE_TYPES) {
+    if (lower.includes(keyword)) {
+      type = label;
+      break;
+    }
+  }
+
+  if (brand && type) return `${brand} - ${type}`;
+  if (brand) return brand;
+  if (type) return type;
+  return '';
+}
+
+// Validate that a string looks like an appliance model number
+function isValidModel(str) {
+  if (!str || str.length < 5 || str.length > 20) return false;
+  // Must start with a letter
+  if (!/^[A-Z]/.test(str)) return false;
+  // Must contain at least one digit
+  if (!/\d/.test(str)) return false;
+  // Must contain at least 2 letters
+  if ((str.match(/[A-Z]/g) || []).length < 2) return false;
+  // Reject common non-model patterns
+  if (/^(ORDER|DATE|ITEM|QTY|PRICE|TOTAL|PAGE|INV|PO\d|ACCT)/i.test(str)) return false;
+  // Reject if it looks like a date (e.g., JAN152025)
+  if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d/i.test(str)) return false;
+  return true;
+}
+
 export default function DocumentUpload({ onParsedItems }) {
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState(null);
@@ -104,22 +172,14 @@ export default function DocumentUpload({ onParsedItems }) {
     const modelPositions = [];
 
     while ((match = modelPattern.exec(text)) !== null) {
-      // Capture description: text between previous model (or start) and this match
+      // Capture raw description: text before this model's parentheses
       const descStart = modelPositions.length > 0
         ? modelPositions[modelPositions.length - 1].index
         : Math.max(0, match.index - 150);
       const rawDesc = text.substring(descStart, match.index).trim();
 
-      // Clean up description: take last meaningful segment (after last delimiter/line break)
-      let description = '';
-      const descLines = rawDesc.split(/[\n\r]+/);
-      const lastLine = descLines[descLines.length - 1].trim();
-      // Remove leading numbers, bullets, quantities
-      const cleaned = lastLine.replace(/^[\d.)\-•*\s]+/, '').replace(/\s{2,}/g, ' ').trim();
-      // Only keep if it looks like a product description (has letters, reasonable length)
-      if (cleaned.length > 3 && cleaned.length < 120 && /[a-zA-Z]/.test(cleaned)) {
-        description = cleaned;
-      }
+      // Extract just brand + appliance type
+      const description = cleanDescription(rawDesc);
 
       modelPositions.push({ model: match[1], index: match.index + match[0].length, description });
     }
@@ -157,7 +217,7 @@ export default function DocumentUpload({ onParsedItems }) {
    * Parse invoice-style PDFs.
    * Detect item table by "MODEL" header, parse lines starting with uppercase model token,
    * capture first token as model and last dollar amount as price.
-   * Description is the text between model and price.
+   * Description is cleaned to brand + appliance type only.
    */
   function parseInvoiceText(text) {
     const items = [];
@@ -169,42 +229,31 @@ export default function DocumentUpload({ onParsedItems }) {
     // Get everything after the header
     const afterHeader = text.substring(headerMatch.index + headerMatch[0].length);
 
-    // Split into rough lines by looking for patterns
-    // PDF text extraction joins everything with spaces, so we look for model-number patterns
-    // A model number starts with uppercase letters/digits at a "line start" position
-    const linePattern = /(?:^|\s{2,})([A-Z][A-Z0-9]{2,}[A-Z0-9\-\/]*[A-Z0-9])\s+(.+?)(\$?\s*[\d,]+\.\d{2})/g;
+    // Stop keywords — everything after these is not appliance data
+    const stopPattern = /\b(?:SUBTOTAL|SUB\s*TOTAL|TOTAL|SALES\s*TAX|HST|GST|AMOUNT\s*DUE|PROTECTED\s*ITEMS?)\b/i;
+    const stopMatch = stopPattern.exec(afterHeader);
+    const itemSection = stopMatch ? afterHeader.substring(0, stopMatch.index) : afterHeader;
+
+    // Skip patterns for non-appliance lines
+    const skipPattern = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
+
+    // Strategy 1: Look for model-number tokens followed by description and a price
+    // Model pattern: starts with 2+ letters, has digits, 5-20 chars total
+    const linePattern = /(?:^|\s{2,}|\n)([A-Z]{2,}[A-Z0-9\-\/]*\d[A-Z0-9\-\/]*)\s+(.+?)(\$?\s*[\d,]+\.\d{2})/g;
     let lineMatch;
 
-    while ((lineMatch = linePattern.exec(afterHeader)) !== null) {
-      const fullMatch = lineMatch[0].toLowerCase();
-      // Stop at subtotal/total/tax lines
-      if (/subtotal|sub\s*total|^total|sales\s*tax|hst|gst|amount\s*due/i.test(fullMatch)) break;
-
+    while ((lineMatch = linePattern.exec(itemSection)) !== null) {
       const modelCandidate = lineMatch[1].trim();
       const middleText = lineMatch[2].trim();
       const priceStr = lineMatch[3].trim();
 
-      // Skip non-appliance lines (delivery, protection plans, accessories, hose kits)
-      if (/(?:delivery|install|hose|kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service)/i.test(middleText)) continue;
-      if (/(?:delivery|install|hose|kit|bracket|connector|cpp|protection\s*plan|protected\s*item)/i.test(modelCandidate)) continue;
-
-      // Model must be at least 4 chars and contain a digit
-      if (modelCandidate.length < 4 || !/\d/.test(modelCandidate)) continue;
+      if (!isValidModel(modelCandidate)) continue;
+      if (skipPattern.test(middleText) || skipPattern.test(modelCandidate)) continue;
 
       const cost = parseFloat(priceStr.replace(/[$,\s]/g, ''));
-      if (isNaN(cost) || cost <= 0) continue;
+      if (isNaN(cost) || cost <= 0 || cost < 50) continue; // Skip tiny amounts (likely accessories)
 
-      // Extract description: brand and product type from middle text
-      let description = middleText
-        .replace(/\$[\d,]+\.\d{2}/g, '') // remove any extra prices
-        .replace(/\s*\d+\s*$/, '') // remove trailing quantity
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-
-      // Cap description length
-      if (description.length > 100) {
-        description = description.substring(0, 100).trim();
-      }
+      const description = cleanDescription(middleText);
 
       items.push({
         id: crypto.randomUUID(),
@@ -216,30 +265,29 @@ export default function DocumentUpload({ onParsedItems }) {
       });
     }
 
-    // If regex approach found nothing, try a simpler line-by-line split approach
+    // Strategy 2: If regex approach found nothing, try splitting by potential model tokens
     if (items.length === 0) {
-      const segments = afterHeader.split(/(?=(?:^|\s{2,})[A-Z][A-Z0-9]{3,})/);
-      for (const seg of segments) {
-        const trimmed = seg.trim();
-        if (!trimmed) continue;
+      // Look for tokens that match appliance model patterns
+      const tokenPattern = /\b([A-Z]{2,}[A-Z0-9\-]{2,}\d[A-Z0-9\-]*)\b/g;
+      let tokenMatch;
 
-        // Stop conditions
-        if (/^(?:SUBTOTAL|TOTAL|TAX|HST|GST|AMOUNT)/i.test(trimmed)) break;
+      while ((tokenMatch = tokenPattern.exec(itemSection)) !== null) {
+        const model = tokenMatch[1];
+        if (!isValidModel(model)) continue;
 
-        // Try to extract: MODEL_TOKEN description... price
-        const segMatch = trimmed.match(/^([A-Z][A-Z0-9\-\/]{3,}[A-Z0-9])\s+(.+?)\s+\$?\s*([\d,]+\.\d{2})/);
-        if (!segMatch) continue;
+        // Look for the nearest price after this model
+        const afterModel = itemSection.substring(tokenMatch.index + model.length, tokenMatch.index + model.length + 300);
 
-        const model = segMatch[1];
-        const desc = segMatch[2].replace(/\$[\d,]+\.\d{2}/g, '').replace(/\s{2,}/g, ' ').trim();
-        const cost = parseFloat(segMatch[3].replace(/,/g, ''));
+        // Get description text between model and price
+        const priceMatch = afterModel.match(/^(.+?)\$?\s*([\d,]+\.\d{2})/);
+        if (!priceMatch) continue;
 
-        if (!/\d/.test(model) || model.length < 4) continue;
-        if (isNaN(cost) || cost <= 0) continue;
-        if (/(?:delivery|install|hose|kit|bracket|connector|cpp|protection|labour|labor)/i.test(desc)) continue;
+        const descText = priceMatch[1].trim();
+        const cost = parseFloat(priceMatch[2].replace(/,/g, ''));
+        if (isNaN(cost) || cost <= 0 || cost < 50) continue;
+        if (skipPattern.test(descText)) continue;
 
-        let description = desc;
-        if (description.length > 100) description = description.substring(0, 100).trim();
+        const description = cleanDescription(descText);
 
         items.push({
           id: crypto.randomUUID(),
@@ -274,7 +322,7 @@ export default function DocumentUpload({ onParsedItems }) {
             model,
             cost,
             isSmall: false,
-            description: '',
+            description: cleanDescription(model + ' ' + line),
             _source: 'PDF',
           });
         }
