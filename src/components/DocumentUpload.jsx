@@ -11,7 +11,7 @@ const APPLIANCE_TYPES = [
   ['dishwasher', 'Dishwasher'],
   ['range', 'Range'], ['stove', 'Range'], ['oven', 'Oven'], ['cooktop', 'Cooktop'],
   ['microwave', 'Microwave'],
-  ['hood', 'Hood'], ['ventilat', 'Ventilation'],
+  ['hoodfan', 'Hood Fan'], ['hood', 'Hood'], ['ventilat', 'Ventilation'],
   ['compactor', 'Compactor'],
   ['ice maker', 'Ice Maker'],
   ['wine', 'Wine Cooler'], ['beverage', 'Beverage Center'],
@@ -28,6 +28,8 @@ const BRANDS = [
   'Fisher & Paykel', 'Fisher and Paykel', 'Blomberg', 'Cafe', 'Café',
   'Monogram', 'Profile', 'Dacor', 'Bertazzoni', 'Speed Queen', 'Asko',
   'Hisense', 'Insignia', 'Danby', 'Panasonic', 'Sharp', 'Midea',
+  'Zephyr', 'Broan', 'Faber', 'Fulgor Milano', 'Smeg', 'La Cornue',
+  'Fisher Paykel', 'GE Profile', 'GE Cafe', 'Liebherr',
 ];
 
 function cleanDescription(rawDesc) {
@@ -35,10 +37,30 @@ function cleanDescription(rawDesc) {
   const lower = rawDesc.toLowerCase();
 
   let brand = '';
-  for (const b of BRANDS) {
-    if (lower.includes(b.toLowerCase())) {
-      brand = b;
-      break;
+  // First, check if description is comma-separated (invoice format: "LG, WASHER, F/L, GRAPHITE STEEL")
+  // Brand is the first token before the first comma
+  if (rawDesc.includes(',')) {
+    const firstPart = rawDesc.split(',')[0].trim();
+    // Check if firstPart matches a known brand (case-insensitive)
+    for (const b of BRANDS) {
+      if (firstPart.toLowerCase() === b.toLowerCase()) {
+        brand = b;
+        break;
+      }
+    }
+    // If not a known brand but looks like one (short uppercase word), use it as-is
+    if (!brand && /^[A-Z][A-Za-z&\s\-]{1,20}$/.test(firstPart) && !/\d/.test(firstPart)) {
+      brand = firstPart.charAt(0).toUpperCase() + firstPart.slice(1).toLowerCase();
+    }
+  }
+
+  // Fallback: search entire text for known brand names
+  if (!brand) {
+    for (const b of BRANDS) {
+      if (lower.includes(b.toLowerCase())) {
+        brand = b;
+        break;
+      }
     }
   }
 
@@ -47,6 +69,17 @@ function cleanDescription(rawDesc) {
     if (lower.includes(keyword)) {
       type = label;
       break;
+    }
+  }
+
+  // For invoice descriptions with "HOODFAN" style keywords, also check without spaces
+  if (!type) {
+    const noSpaceLower = lower.replace(/[\s,\/]+/g, '');
+    for (const [keyword, label] of APPLIANCE_TYPES) {
+      if (noSpaceLower.includes(keyword.replace(/\s/g, ''))) {
+        type = label;
+        break;
+      }
     }
   }
 
@@ -214,84 +247,108 @@ export default function DocumentUpload({ onParsedItems }) {
   }
 
   /**
-   * Parse invoice-style PDFs.
-   * Detect item table by "MODEL" header, parse lines starting with uppercase model token,
-   * capture first token as model and last dollar amount as price.
-   * Description is cleaned to brand + appliance type only.
+   * Parse invoice-style PDFs (e.g. Trail Appliances invoices).
+   * Anchors on the RIGHT side of each line: warehouse code pattern [A-Z]{2}\d{2}
+   * Real appliance lines look like: MODEL BRAND, DESC, ... QTY WAREHOUSE PRICE
+   * e.g. WM5500HVA LG, WASHER, F/L, GRAPHITE STEEL 1 IE27 1165.00
+   * Header repeats on every page — re-enter parsing mode each time.
    */
   function parseInvoiceText(text) {
     const items = [];
-
-    // Find the header line containing MODEL
-    const headerMatch = text.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
-    if (!headerMatch) return items;
-
-    // Get everything after the header
-    const afterHeader = text.substring(headerMatch.index + headerMatch[0].length);
-
-    // Stop keywords — everything after these is not appliance data
-    const stopPattern = /\b(?:SUBTOTAL|SUB\s*TOTAL|TOTAL|SALES\s*TAX|HST|GST|AMOUNT\s*DUE|PROTECTED\s*ITEMS?)\b/i;
-    const stopMatch = stopPattern.exec(afterHeader);
-    const itemSection = stopMatch ? afterHeader.substring(0, stopMatch.index) : afterHeader;
+    const seenModels = new Set();
 
     // Skip patterns for non-appliance lines
     const skipPattern = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
 
-    // Strategy 1: Look for model-number tokens followed by description and a price
-    // Model pattern: starts with 2+ letters, has digits, 5-20 chars total
-    const linePattern = /(?:^|\s{2,}|\n)([A-Z]{2,}[A-Z0-9\-\/]*\d[A-Z0-9\-\/]*)\s+(.+?)(\$?\s*[\d,]+\.\d{2})/g;
-    let lineMatch;
+    // Process each page separately — split by newlines (pages joined with \n in parsePDF)
+    const pages = text.split('\n');
 
-    while ((lineMatch = linePattern.exec(itemSection)) !== null) {
-      const modelCandidate = lineMatch[1].trim();
-      const middleText = lineMatch[2].trim();
-      const priceStr = lineMatch[3].trim();
+    for (const pageText of pages) {
+      // Find the header on this page (it repeats on every page)
+      const headerMatch = pageText.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
+      if (!headerMatch) continue;
 
-      if (!isValidModel(modelCandidate)) continue;
-      if (skipPattern.test(middleText) || skipPattern.test(modelCandidate)) continue;
+      // Get everything after the header on this page
+      let section = pageText.substring(headerMatch.index + headerMatch[0].length);
 
-      const cost = parseFloat(priceStr.replace(/[$,\s]/g, ''));
-      if (isNaN(cost) || cost <= 0 || cost < 50) continue; // Skip tiny amounts (likely accessories)
+      // Stop at summary lines
+      const stopMatch = /\b(?:SUBTOTAL|SUB\s*TOTAL|TOTAL|SALES\s*TAX|HST|GST|AMOUNT\s*DUE|PROTECTED\s*ITEMS?)\b/i.exec(section);
+      if (stopMatch) {
+        section = section.substring(0, stopMatch.index);
+      }
 
-      const description = cleanDescription(middleText);
+      // Core strategy: anchor on warehouse code + price on the RIGHT side
+      // Pattern: {qty} {warehouse: XX99} {price: 999.99}
+      const warehousePattern = /(\d+)\s+([A-Z]{2}\d{2})\s+([\d,]+\.\d{2})/g;
+      let match;
 
-      items.push({
-        id: crypto.randomUUID(),
-        model: modelCandidate,
-        cost,
-        isSmall: false,
-        description,
-        _source: 'Invoice',
-      });
-    }
+      while ((match = warehousePattern.exec(section)) !== null) {
+        const qty = parseInt(match[1], 10);
+        const warehouse = match[2];
+        const priceStr = match[3];
 
-    // Strategy 2: If regex approach found nothing, try splitting by potential model tokens
-    if (items.length === 0) {
-      // Look for tokens that match appliance model patterns
-      const tokenPattern = /\b([A-Z]{2,}[A-Z0-9\-]{2,}\d[A-Z0-9\-]*)\b/g;
-      let tokenMatch;
+        // Skip protection plans — warehouse shows as ** (but our pattern won't match ** anyway)
+        // Skip if warehouse looks wrong
+        if (!warehouse || warehouse === '**') continue;
 
-      while ((tokenMatch = tokenPattern.exec(itemSection)) !== null) {
-        const model = tokenMatch[1];
-        if (!isValidModel(model)) continue;
+        const cost = parseFloat(priceStr.replace(/,/g, ''));
+        if (isNaN(cost) || cost < 50) continue; // Skip accessories / tiny amounts
 
-        // Look for the nearest price after this model
-        const afterModel = itemSection.substring(tokenMatch.index + model.length, tokenMatch.index + model.length + 300);
+        // Everything BEFORE this match on the same "line" is the model + description
+        const frontText = section.substring(0, match.index).trim();
 
-        // Get description text between model and price
-        const priceMatch = afterModel.match(/^(.+?)\$?\s*([\d,]+\.\d{2})/);
-        if (!priceMatch) continue;
+        // Take the last logical line: split on double-space or known boundaries
+        // pdfjs joins items with spaces, so look backwards for the previous item's price
+        // to find where this line starts
+        const prevPriceEnd = frontText.search(/\d+\.\d{2}\s+/);
+        let lineText = frontText;
+        if (prevPriceEnd >= 0) {
+          // Find end of previous price+whitespace to get start of current line
+          const afterPrevPrice = frontText.substring(prevPriceEnd).match(/^\d+\.\d{2}\s+/);
+          if (afterPrevPrice) {
+            lineText = frontText.substring(prevPriceEnd + afterPrevPrice[0].length);
+          }
+        }
 
-        const descText = priceMatch[1].trim();
-        const cost = parseFloat(priceMatch[2].replace(/,/g, ''));
-        if (isNaN(cost) || cost <= 0 || cost < 50) continue;
-        if (skipPattern.test(descText)) continue;
+        // Also try splitting on "ORDERED" which follows headers
+        const orderedIdx = lineText.lastIndexOf('ORDERED');
+        if (orderedIdx >= 0) {
+          lineText = lineText.substring(orderedIdx + 'ORDERED'.length).trim();
+        }
+
+        lineText = lineText.trim();
+        if (!lineText) continue;
+
+        // First token is the model number
+        const tokens = lineText.split(/\s+/);
+        const modelCandidate = tokens[0];
+
+        // Validate model: single token, 5+ chars, has letters AND digits, doesn't start with digit
+        if (!modelCandidate || modelCandidate.length < 5) continue;
+        if (/^\d/.test(modelCandidate)) continue;
+        if (!/[A-Z]/i.test(modelCandidate) || !/\d/.test(modelCandidate)) continue;
+
+        // Skip if model is actually two tokens (accessory pattern like "SS WASHER")
+        // A valid model is one contiguous alphanumeric token
+        if (!/^[A-Z][A-Z0-9\-\/]+$/i.test(modelCandidate)) continue;
+
+        if (!isValidModel(modelCandidate)) continue;
+
+        // Skip duplicate models
+        if (seenModels.has(modelCandidate)) continue;
+        seenModels.add(modelCandidate);
+
+        // Description is everything between model and the qty/warehouse/price
+        const descText = tokens.slice(1).join(' ').trim();
+
+        // Skip non-appliance items
+        if (skipPattern.test(descText) || skipPattern.test(modelCandidate)) continue;
 
         const description = cleanDescription(descText);
 
         items.push({
           id: crypto.randomUUID(),
-          model,
+          model: modelCandidate,
           cost,
           isSmall: false,
           description,
