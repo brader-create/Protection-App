@@ -3,52 +3,111 @@ import ApplianceForm from './components/ApplianceForm';
 import ApplianceList from './components/ApplianceList';
 import DocumentUpload from './components/DocumentUpload';
 import ResultsPanel from './components/ResultsPanel';
-import YearSelector from './components/YearSelector';
 import { calculateAll } from './utils/calculator';
+import { WARRANTY_YEARS } from './data/warrantyPricing';
 
 export default function App() {
   const [appliances, setAppliances] = useState([]);
-  const [years, setYears] = useState(3);
-  const [results, setResults] = useState(null);
+  const [allResults, setAllResults] = useState(null);
+  const [activeYear, setActiveYear] = useState(3);
   const [inputMode, setInputMode] = useState('manual');
   const [calculating, setCalculating] = useState(false);
+  const [excludedIds, setExcludedIds] = useState(new Set());
+  const [save3Active, setSave3Active] = useState(false);
+  const [save3Exclusions, setSave3Exclusions] = useState(new Set());
 
   function addAppliance(appliance) {
     setAppliances((prev) => [...prev, appliance]);
-    setResults(null);
+    setAllResults(null);
   }
 
   function removeAppliance(id) {
     setAppliances((prev) => prev.filter((a) => a.id !== id));
-    setResults(null);
+    setExcludedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    setSave3Exclusions((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    setAllResults(null);
+  }
+
+  function updateAppliance(id, updates) {
+    setAppliances((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+    setAllResults(null);
   }
 
   function addParsedItems(items) {
     setAppliances((prev) => [...prev, ...items]);
-    setResults(null);
+    setAllResults(null);
   }
 
   function clearAll() {
     setAppliances([]);
-    setResults(null);
+    setExcludedIds(new Set());
+    setSave3Exclusions(new Set());
+    setAllResults(null);
+  }
+
+  function toggleAppliance(id) {
+    setExcludedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+    setAllResults(null);
+  }
+
+  function toggleSave3() {
+    setSave3Active((prev) => !prev);
+    setSave3Exclusions(new Set());
+    setAllResults(null);
+  }
+
+  function toggleSave3ForItem(id) {
+    setSave3Exclusions((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+    setAllResults(null);
   }
 
   function handleCalculate() {
-    if (appliances.length === 0) return;
+    const active = appliances.filter((a) => !excludedIds.has(a.id));
+    if (active.length === 0) return;
+
     setCalculating(true);
-    setResults(null);
-    // Defer to let the spinner render before heavy computation
+    setAllResults(null);
+
     setTimeout(() => {
-      const result = calculateAll(appliances, years);
-      setResults(result);
+      const prepared = active.map((a) => {
+        const discounted = save3Active && !save3Exclusions.has(a.id);
+        return {
+          ...a,
+          originalCost: a.cost,
+          cost: discounted ? Math.round(a.cost * 0.97 * 100) / 100 : a.cost,
+        };
+      });
+
+      const byYear = {};
+      const originalByYear = {};
+      for (const yr of WARRANTY_YEARS) {
+        byYear[yr] = calculateAll(prepared, yr);
+        if (save3Active) {
+          originalByYear[yr] = calculateAll(active, yr);
+        }
+      }
+
+      const originalTotal = active.reduce((s, a) => s + a.cost, 0);
+      const discountedTotal = prepared.reduce((s, a) => s + a.cost, 0);
+
+      setAllResults({
+        byYear,
+        originalByYear: save3Active ? originalByYear : null,
+        productSavings: originalTotal - discountedTotal,
+      });
       setCalculating(false);
     }, 50);
   }
 
-  function handleYearChange(newYears) {
-    setYears(newYears);
-    setResults(null);
-  }
+  const activeCount = appliances.filter((a) => !excludedIds.has(a.id)).length;
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -71,7 +130,6 @@ export default function App() {
               <p className="text-xs text-slate-500">Warranty List Options 6.0</p>
             </div>
           </div>
-
         </div>
       </header>
 
@@ -83,7 +141,7 @@ export default function App() {
               <h2 className="text-lg font-semibold text-slate-100">Appliances</h2>
               {appliances.length > 0 && (
                 <span className="bg-blue-500/20 text-blue-300 text-xs font-bold px-2.5 py-0.5 rounded-full">
-                  {appliances.length}
+                  {excludedIds.size > 0 ? `${activeCount}/${appliances.length}` : appliances.length}
                 </span>
               )}
             </div>
@@ -95,12 +153,7 @@ export default function App() {
               >
                 <span className="flex items-center gap-1.5">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                   Manual Entry
                 </span>
@@ -111,12 +164,7 @@ export default function App() {
               >
                 <span className="flex items-center gap-1.5">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                   Upload Document
                 </span>
@@ -137,44 +185,72 @@ export default function App() {
               <DocumentUpload onParsedItems={addParsedItems} />
             )}
 
-            <ApplianceList appliances={appliances} onRemove={removeAppliance} />
+            <ApplianceList
+              appliances={appliances}
+              onRemove={removeAppliance}
+              onUpdate={updateAppliance}
+              excludedIds={excludedIds}
+              onToggle={toggleAppliance}
+              save3Active={save3Active}
+              save3Exclusions={save3Exclusions}
+              onToggle3={toggleSave3ForItem}
+            />
           </div>
         </div>
 
-        {/* Coverage Term + Calculate */}
+        {/* Save 3% + Calculate */}
         <div className="flex flex-col items-center gap-4">
-          <YearSelector selected={years} onChange={handleYearChange} />
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none bg-slate-900/80 border border-slate-700/50 rounded-xl px-5 py-2.5 hover:bg-slate-800/80 transition-all">
+              <input
+                type="checkbox"
+                checked={save3Active}
+                onChange={toggleSave3}
+                className="w-4 h-4 rounded border-slate-600 text-amber-500 focus:ring-amber-500/50 bg-slate-700 cursor-pointer accent-amber-500"
+              />
+              <span className={`text-sm font-medium ${save3Active ? 'text-amber-300' : 'text-slate-400'}`}>
+                Save 3%
+              </span>
+              {save3Active && (
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold">
+                  ON
+                </span>
+              )}
+            </label>
+          </div>
+
           <button
             onClick={handleCalculate}
-            disabled={appliances.length === 0 || calculating}
+            disabled={activeCount === 0 || calculating}
             className="btn-primary text-lg px-10 py-4 flex items-center gap-3"
           >
             {calculating ? (
               <>
-                <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="w-6 h-6 border-[3px] border-white/30 border-t-white rounded-full animate-spin" />
                 Calculating...
               </>
             ) : (
               <>
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                  />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
-                Calculate Warranty Pricing
+                Calculate All Plans
               </>
             )}
           </button>
         </div>
 
         {/* Results */}
-        {results && (
+        {allResults && (
           <div className="card">
             <div className="card-body">
-              <ResultsPanel results={results} appliances={appliances} />
+              <ResultsPanel
+                allResults={allResults}
+                activeYear={activeYear}
+                onYearChange={setActiveYear}
+                appliances={appliances.filter((a) => !excludedIds.has(a.id))}
+                save3Active={save3Active}
+              />
             </div>
           </div>
         )}
