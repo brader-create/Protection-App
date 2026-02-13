@@ -50,8 +50,10 @@ function ResultCard({ result, cheapestPrice }) {
             {result.items.map((item, i) => (
               <div key={i} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/30">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="badge-blue text-[10px]">{item.groupLabel}</span>
-                  <span className="text-sm font-semibold text-slate-200 tabular-nums">
+                  {item.groupLabel !== '1 Appliance' && (
+                    <span className="badge-blue text-[10px]">{item.groupLabel}</span>
+                  )}
+                  <span className="text-sm font-semibold text-slate-200 tabular-nums ml-auto">
                     {formatPrice(item.price)}
                   </span>
                 </div>

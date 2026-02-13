@@ -9,6 +9,7 @@ import {
 
 /**
  * Calculate individual pricing - each appliance gets its own single warranty.
+ * Small appliances try both SMALL and SINGLE pricing, using whichever is cheaper.
  */
 export function calculateIndividual(appliances, years) {
   const items = [];
@@ -16,8 +17,26 @@ export function calculateIndividual(appliances, years) {
   let allValid = true;
 
   for (const app of appliances) {
-    const groupType = app.isSmall ? GROUP_TYPES.SMALL : GROUP_TYPES.SINGLE;
-    const price = lookupPrice(groupType, app.cost, years);
+    let groupType, price;
+
+    if (app.isSmall) {
+      const smallPrice = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
+      const singlePrice = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+      if (smallPrice !== null && (singlePrice === null || smallPrice <= singlePrice)) {
+        groupType = GROUP_TYPES.SMALL;
+        price = smallPrice;
+      } else if (singlePrice !== null) {
+        groupType = GROUP_TYPES.SINGLE;
+        price = singlePrice;
+      } else {
+        groupType = GROUP_TYPES.SMALL;
+        price = null;
+      }
+    } else {
+      groupType = GROUP_TYPES.SINGLE;
+      price = lookupPrice(groupType, app.cost, years);
+    }
+
     if (price === null) {
       allValid = false;
       items.push({
@@ -84,6 +103,8 @@ export function calculateSingleBundle(appliances, years) {
 
 /**
  * Find the best combination of warranty groups.
+ * Small appliances are included in the optimization — they're only priced
+ * separately (using the Small Appliance bracket) when that's actually cheaper.
  * Uses dynamic programming / exhaustive partition search for small sets,
  * and greedy heuristics for larger sets.
  */
@@ -99,69 +120,12 @@ export function calculateBestMix(appliances, years) {
     };
   }
 
-  // Separate small appliances from regular ones
-  const smalls = appliances.filter((a) => a.isSmall);
-  const regulars = appliances.filter((a) => !a.isSmall);
+  // All appliances go into the optimization — small ones included
+  const bestPartition = findBestPartition(appliances, years);
 
-  // Price each small appliance individually (small appliance group is always 1 at a time)
-  const smallItems = [];
-  let smallTotal = 0;
-  let smallsValid = true;
-
-  for (const app of smalls) {
-    const price = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
-    if (price === null) {
-      // Try single appliance group as fallback
-      const singlePrice = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
-      if (singlePrice === null) {
-        smallsValid = false;
-        smallItems.push({
-          appliances: [app],
-          groupType: GROUP_TYPES.SMALL,
-          groupLabel: GROUP_LABELS[GROUP_TYPES.SMALL],
-          totalCost: app.cost,
-          price: null,
-          error: `No bracket for $${app.cost.toLocaleString()}`,
-        });
-      } else {
-        smallTotal += singlePrice;
-        smallItems.push({
-          appliances: [app],
-          groupType: GROUP_TYPES.SINGLE,
-          groupLabel: GROUP_LABELS[GROUP_TYPES.SINGLE],
-          totalCost: app.cost,
-          price: singlePrice,
-          bracket: getBracket(GROUP_TYPES.SINGLE, app.cost),
-        });
-      }
-    } else {
-      smallTotal += price;
-      smallItems.push({
-        appliances: [app],
-        groupType: GROUP_TYPES.SMALL,
-        groupLabel: GROUP_LABELS[GROUP_TYPES.SMALL],
-        totalCost: app.cost,
-        price,
-        bracket: getBracket(GROUP_TYPES.SMALL, app.cost),
-      });
-    }
-  }
-
-  if (regulars.length === 0) {
+  if (!bestPartition) {
     return {
-      items: smallItems,
-      total: smallsValid ? smallTotal : null,
-      valid: smallsValid,
-      label: 'Best Mix',
-    };
-  }
-
-  // For regular appliances, find optimal partition into groups of 1, 2, or 3+
-  const bestPartition = findBestPartition(regulars, years);
-
-  if (!bestPartition || !smallsValid) {
-    return {
-      items: [...smallItems, ...(bestPartition ? bestPartition.items : [])],
+      items: [],
       total: null,
       valid: false,
       label: 'Best Mix',
@@ -169,8 +133,8 @@ export function calculateBestMix(appliances, years) {
   }
 
   return {
-    items: [...smallItems, ...bestPartition.items],
-    total: smallTotal + bestPartition.total,
+    items: bestPartition.items,
+    total: bestPartition.total,
     valid: true,
     label: 'Best Mix',
   };
@@ -216,21 +180,21 @@ function exhaustiveSearch(appliances, years) {
       const groupSize = subset.length;
       if (groupSize === 0) continue;
 
-      // Determine group type
-      let groupType;
-      if (groupSize === 1) {
-        groupType = GROUP_TYPES.SINGLE;
-      } else if (groupSize === 2) {
-        groupType = GROUP_TYPES.DOUBLE;
-      } else {
-        groupType = GROUP_TYPES.TRIPLE_PLUS;
-      }
-
       const groupAppliances = subset.map((i) => appliances[i]);
       const totalCost = groupAppliances.reduce((s, a) => s + a.cost, 0);
-      const price = lookupPrice(groupType, totalCost, years);
 
-      if (price === null) continue;
+      // Determine group type(s) to try
+      const typesToTry = [];
+      if (groupSize === 1) {
+        typesToTry.push(GROUP_TYPES.SINGLE);
+        if (groupAppliances[0].isSmall) {
+          typesToTry.push(GROUP_TYPES.SMALL);
+        }
+      } else if (groupSize === 2) {
+        typesToTry.push(GROUP_TYPES.DOUBLE);
+      } else {
+        typesToTry.push(GROUP_TYPES.TRIPLE_PLUS);
+      }
 
       // Remove these indices from the mask
       let newMask = mask;
@@ -238,25 +202,30 @@ function exhaustiveSearch(appliances, years) {
         newMask &= ~(1 << i);
       }
 
-      const rest = solve(newMask);
-      if (rest === null) continue;
+      for (const groupType of typesToTry) {
+        const price = lookupPrice(groupType, totalCost, years);
+        if (price === null) continue;
 
-      const totalPrice = price + rest.total;
-      if (best === null || totalPrice < best.total) {
-        best = {
-          total: totalPrice,
-          groups: [
-            {
-              appliances: groupAppliances,
-              groupType,
-              groupLabel: GROUP_LABELS[groupType],
-              totalCost,
-              price,
-              bracket: getBracket(groupType, totalCost),
-            },
-            ...rest.groups,
-          ],
-        };
+        const rest = solve(newMask);
+        if (rest === null) continue;
+
+        const totalPrice = price + rest.total;
+        if (best === null || totalPrice < best.total) {
+          best = {
+            total: totalPrice,
+            groups: [
+              {
+                appliances: groupAppliances,
+                groupType,
+                groupLabel: GROUP_LABELS[groupType],
+                totalCost,
+                price,
+                bracket: getBracket(groupType, totalCost),
+              },
+              ...rest.groups,
+            ],
+          };
+        }
       }
     }
 
@@ -387,20 +356,30 @@ function greedySearch(appliances, years) {
     }
   }
 
-  // Remaining: individual
+  // Remaining: individual (try SMALL pricing for small appliances if cheaper)
   for (let i = 0; i < sorted.length; i++) {
     if (used.has(i)) continue;
     const app = sorted[i];
-    const price = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+    let groupType = GROUP_TYPES.SINGLE;
+    let price = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+
+    if (app.isSmall) {
+      const smallPrice = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
+      if (smallPrice !== null && (price === null || smallPrice < price)) {
+        groupType = GROUP_TYPES.SMALL;
+        price = smallPrice;
+      }
+    }
+
     if (price !== null) {
       total += price;
       groups.push({
         appliances: [app],
-        groupType: GROUP_TYPES.SINGLE,
-        groupLabel: GROUP_LABELS[GROUP_TYPES.SINGLE],
+        groupType,
+        groupLabel: GROUP_LABELS[groupType],
         totalCost: app.cost,
         price,
-        bracket: getBracket(GROUP_TYPES.SINGLE, app.cost),
+        bracket: getBracket(groupType, app.cost),
       });
     } else {
       return null;
