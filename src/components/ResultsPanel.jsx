@@ -384,7 +384,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
           originalResult={originalResults?.singleBundle}
           save3Active={save3Active}
           years={activeYear}
-          showThresholds={showThresholds}
+          showThresholds={false}
         />
         <ResultCard
           result={individual}
@@ -392,7 +392,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
           originalResult={originalResults?.individual}
           save3Active={save3Active}
           years={activeYear}
-          showThresholds={showThresholds}
+          showThresholds={false}
         />
       </div>
     </div>

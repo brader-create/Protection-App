@@ -24,17 +24,24 @@ export default function App() {
   const [hasResults, setHasResults] = useState(false);
 
   const calcIdRef = useRef(0);
+  const pregenIdRef = useRef(0);
 
-  // Derive the displayed allResults from state
-  const allResults = useMemo(() => {
-    const byYear = save3Active ? save3ByYear : normalByYear;
-    if (Object.keys(byYear).length === 0) return null;
+  // Separate memos so pregenerate doesn't cause re-renders when save3 is off
+  const normalResults = useMemo(() => {
+    if (Object.keys(normalByYear).length === 0) return null;
+    return { byYear: normalByYear, originalByYear: null, productSavings: 0 };
+  }, [normalByYear]);
+
+  const save3Results = useMemo(() => {
+    if (Object.keys(save3ByYear).length === 0) return null;
     return {
-      byYear,
-      originalByYear: save3Active && Object.keys(save3OrigByYear).length > 0 ? save3OrigByYear : null,
-      productSavings: save3Active ? productSavings : 0,
+      byYear: save3ByYear,
+      originalByYear: Object.keys(save3OrigByYear).length > 0 ? save3OrigByYear : null,
+      productSavings,
     };
-  }, [normalByYear, save3ByYear, save3OrigByYear, save3Active, productSavings]);
+  }, [save3ByYear, save3OrigByYear, productSavings]);
+
+  const allResults = save3Active ? save3Results : normalResults;
 
   function clearResults() {
     setNormalByYear({});
@@ -94,7 +101,7 @@ export default function App() {
 
   // Progressive calculation: one year at a time (4→3→2)
   const runProgressiveCalc = useCallback((opts = {}) => {
-    const { forSave3 = false, pregenerate = false } = opts;
+    const { forSave3 = false } = opts;
     const apps = appliancesRef.current;
     const excluded = excludedIdsRef.current;
     const s3Exclusions = save3ExclusionsRef.current;
@@ -103,22 +110,18 @@ export default function App() {
     if (active.length === 0) return;
 
     const id = ++calcIdRef.current;
+    setCalculating(true);
 
-    if (!pregenerate) {
-      setCalculating(true);
-      if (forSave3) {
-        setSave3ByYear({});
-        setSave3OrigByYear({});
-      } else {
-        setNormalByYear({});
-      }
+    if (forSave3) {
+      setSave3ByYear({});
+      setSave3OrigByYear({});
     } else {
-      setPrecomputing(true);
+      setNormalByYear({});
     }
 
-    const prepared = forSave3 || pregenerate
+    const prepared = forSave3
       ? active.map((a) => {
-          const discounted = pregenerate || !s3Exclusions.has(a.id);
+          const discounted = !s3Exclusions.has(a.id);
           return {
             ...a,
             originalCost: a.cost,
@@ -127,7 +130,7 @@ export default function App() {
         })
       : active;
 
-    if (forSave3 || pregenerate) {
+    if (forSave3) {
       const origTotal = active.reduce((s, a) => s + a.cost, 0);
       const discTotal = prepared.reduce((s, a) => s + a.cost, 0);
       setProductSavings(origTotal - discTotal);
@@ -139,15 +142,11 @@ export default function App() {
     function computeNext() {
       if (calcIdRef.current !== id) return; // cancelled
       if (idx >= years.length) {
-        if (!pregenerate) {
-          setCalculating(false);
-          setHasResults(true);
-          // After normal calc done, pre-generate 3% in background
-          if (!forSave3) {
-            runProgressiveCalc({ pregenerate: true });
-          }
-        } else {
-          setPrecomputing(false);
+        setCalculating(false);
+        setHasResults(true);
+        // After normal calc done, pre-generate 3% in background (separate ref)
+        if (!forSave3) {
+          pregenerate3(active);
         }
         return;
       }
@@ -155,12 +154,8 @@ export default function App() {
       const yr = years[idx];
       const result = calculateAll(prepared, yr);
 
-      if (forSave3 || pregenerate) {
-        if (pregenerate) {
-          setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
-        } else {
-          setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
-        }
+      if (forSave3) {
+        setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
         const origResult = calculateAll(active, yr);
         setSave3OrigByYear((prev) => ({ ...prev, [yr]: origResult }));
       } else {
@@ -172,6 +167,46 @@ export default function App() {
     }
 
     setTimeout(computeNext, 15);
+  }, []);
+
+  // Separate pregenerate function using its own ref — doesn't interfere with main calc
+  const pregenerate3 = useCallback((active) => {
+    const pgId = ++pregenIdRef.current;
+    setPrecomputing(true);
+
+    const prepared = active.map((a) => ({
+      ...a,
+      originalCost: a.cost,
+      cost: Math.round(a.cost * 0.97 * 100) / 100,
+    }));
+
+    const origTotal = active.reduce((s, a) => s + a.cost, 0);
+    const discTotal = prepared.reduce((s, a) => s + a.cost, 0);
+
+    const years = [4, 3, 2];
+    let idx = 0;
+
+    function computeNext() {
+      if (pregenIdRef.current !== pgId) return; // cancelled
+      if (idx >= years.length) {
+        setPrecomputing(false);
+        setProductSavings(origTotal - discTotal);
+        return;
+      }
+
+      const yr = years[idx];
+      const result = calculateAll(prepared, yr);
+      setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
+
+      const origResult = calculateAll(active, yr);
+      setSave3OrigByYear((prev) => ({ ...prev, [yr]: origResult }));
+
+      idx++;
+      setTimeout(computeNext, 50); // slower pace for background work
+    }
+
+    // Longer delay before starting background work
+    setTimeout(computeNext, 300);
   }, []);
 
   function handleCalculate() {
@@ -195,16 +230,20 @@ export default function App() {
     setSave3Active(nowActive);
     setSave3Exclusions(new Set());
 
+    // Cancel any running pregenerate
+    ++pregenIdRef.current;
+    setPrecomputing(false);
+
     if (hasResults || Object.keys(normalByYear).length > 0) {
       if (nowActive) {
-        // Check if we have pre-computed 3% cache ready
+        // Check if we have pre-computed 3% cache ready (all 3 years)
         if (Object.keys(save3ByYear).length === 3) {
           // Cache is ready — just switch display (useMemo handles it)
           return;
         }
         // Need to compute — will be triggered by effect below
       }
-      // Turning off — normalByYear is already there, useMemo switches instantly
+      // Turning off — normalByYear is already there, switches instantly
     }
   }
 
