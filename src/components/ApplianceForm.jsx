@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 export default function ApplianceForm({ onAdd }) {
   const [model, setModel] = useState('');
   const [cost, setCost] = useState('');
   const [isSmall, setIsSmall] = useState(false);
+  const modelInputRef = useRef(null);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -20,6 +21,7 @@ export default function ApplianceForm({ onAdd }) {
     setModel('');
     setCost('');
     setIsSmall(false);
+    setTimeout(() => modelInputRef.current?.focus(), 0);
   }
 
   return (
@@ -28,6 +30,7 @@ export default function ApplianceForm({ onAdd }) {
         <div>
           <label className="block text-sm text-slate-400 mb-1.5 font-medium">Model / Description</label>
           <input
+            ref={modelInputRef}
             type="text"
             className="input-field"
             placeholder="e.g. Samsung RF28 Refrigerator"

@@ -9,6 +9,7 @@ import {
 
 /**
  * Calculate individual pricing - each appliance gets its own single warranty.
+ * Small appliances try both SMALL and SINGLE pricing, using whichever is cheaper.
  */
 export function calculateIndividual(appliances, years) {
   const items = [];
@@ -16,8 +17,26 @@ export function calculateIndividual(appliances, years) {
   let allValid = true;
 
   for (const app of appliances) {
-    const groupType = app.isSmall ? GROUP_TYPES.SMALL : GROUP_TYPES.SINGLE;
-    const price = lookupPrice(groupType, app.cost, years);
+    let groupType, price;
+
+    if (app.isSmall) {
+      const smallPrice = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
+      const singlePrice = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+      if (smallPrice !== null && (singlePrice === null || smallPrice <= singlePrice)) {
+        groupType = GROUP_TYPES.SMALL;
+        price = smallPrice;
+      } else if (singlePrice !== null) {
+        groupType = GROUP_TYPES.SINGLE;
+        price = singlePrice;
+      } else {
+        groupType = GROUP_TYPES.SMALL;
+        price = null;
+      }
+    } else {
+      groupType = GROUP_TYPES.SINGLE;
+      price = lookupPrice(groupType, app.cost, years);
+    }
+
     if (price === null) {
       allValid = false;
       items.push({
@@ -84,6 +103,8 @@ export function calculateSingleBundle(appliances, years) {
 
 /**
  * Find the best combination of warranty groups.
+ * Small appliances are included in the optimization — they're only priced
+ * separately (using the Small Appliance bracket) when that's actually cheaper.
  * Uses dynamic programming / exhaustive partition search for small sets,
  * and greedy heuristics for larger sets.
  */
@@ -99,69 +120,12 @@ export function calculateBestMix(appliances, years) {
     };
   }
 
-  // Separate small appliances from regular ones
-  const smalls = appliances.filter((a) => a.isSmall);
-  const regulars = appliances.filter((a) => !a.isSmall);
+  // All appliances go into the optimization — small ones included
+  const bestPartition = findBestPartition(appliances, years);
 
-  // Price each small appliance individually (small appliance group is always 1 at a time)
-  const smallItems = [];
-  let smallTotal = 0;
-  let smallsValid = true;
-
-  for (const app of smalls) {
-    const price = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
-    if (price === null) {
-      // Try single appliance group as fallback
-      const singlePrice = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
-      if (singlePrice === null) {
-        smallsValid = false;
-        smallItems.push({
-          appliances: [app],
-          groupType: GROUP_TYPES.SMALL,
-          groupLabel: GROUP_LABELS[GROUP_TYPES.SMALL],
-          totalCost: app.cost,
-          price: null,
-          error: `No bracket for $${app.cost.toLocaleString()}`,
-        });
-      } else {
-        smallTotal += singlePrice;
-        smallItems.push({
-          appliances: [app],
-          groupType: GROUP_TYPES.SINGLE,
-          groupLabel: GROUP_LABELS[GROUP_TYPES.SINGLE],
-          totalCost: app.cost,
-          price: singlePrice,
-          bracket: getBracket(GROUP_TYPES.SINGLE, app.cost),
-        });
-      }
-    } else {
-      smallTotal += price;
-      smallItems.push({
-        appliances: [app],
-        groupType: GROUP_TYPES.SMALL,
-        groupLabel: GROUP_LABELS[GROUP_TYPES.SMALL],
-        totalCost: app.cost,
-        price,
-        bracket: getBracket(GROUP_TYPES.SMALL, app.cost),
-      });
-    }
-  }
-
-  if (regulars.length === 0) {
+  if (!bestPartition) {
     return {
-      items: smallItems,
-      total: smallsValid ? smallTotal : null,
-      valid: smallsValid,
-      label: 'Best Mix',
-    };
-  }
-
-  // For regular appliances, find optimal partition into groups of 1, 2, or 3+
-  const bestPartition = findBestPartition(regulars, years);
-
-  if (!bestPartition || !smallsValid) {
-    return {
-      items: [...smallItems, ...(bestPartition ? bestPartition.items : [])],
+      items: [],
       total: null,
       valid: false,
       label: 'Best Mix',
@@ -169,21 +133,21 @@ export function calculateBestMix(appliances, years) {
   }
 
   return {
-    items: [...smallItems, ...bestPartition.items],
-    total: smallTotal + bestPartition.total,
+    items: bestPartition.items,
+    total: bestPartition.total,
     valid: true,
     label: 'Best Mix',
   };
 }
 
 /**
- * Find the optimal partition of regular appliances into warranty groups.
- * For up to ~12 appliances, uses exhaustive search. Beyond that, uses greedy.
+ * Find the optimal partition of appliances into warranty groups.
+ * For up to 16 appliances, uses exhaustive search. Beyond that, uses greedy.
  */
 function findBestPartition(appliances, years) {
   const n = appliances.length;
 
-  if (n <= 12) {
+  if (n <= 16) {
     return exhaustiveSearch(appliances, years);
   }
   return greedySearch(appliances, years);
@@ -216,21 +180,21 @@ function exhaustiveSearch(appliances, years) {
       const groupSize = subset.length;
       if (groupSize === 0) continue;
 
-      // Determine group type
-      let groupType;
-      if (groupSize === 1) {
-        groupType = GROUP_TYPES.SINGLE;
-      } else if (groupSize === 2) {
-        groupType = GROUP_TYPES.DOUBLE;
-      } else {
-        groupType = GROUP_TYPES.TRIPLE_PLUS;
-      }
-
       const groupAppliances = subset.map((i) => appliances[i]);
       const totalCost = groupAppliances.reduce((s, a) => s + a.cost, 0);
-      const price = lookupPrice(groupType, totalCost, years);
 
-      if (price === null) continue;
+      // Determine group type(s) to try
+      const typesToTry = [];
+      if (groupSize === 1) {
+        typesToTry.push(GROUP_TYPES.SINGLE);
+        if (groupAppliances[0].isSmall) {
+          typesToTry.push(GROUP_TYPES.SMALL);
+        }
+      } else if (groupSize === 2) {
+        typesToTry.push(GROUP_TYPES.DOUBLE);
+      } else {
+        typesToTry.push(GROUP_TYPES.TRIPLE_PLUS);
+      }
 
       // Remove these indices from the mask
       let newMask = mask;
@@ -238,25 +202,30 @@ function exhaustiveSearch(appliances, years) {
         newMask &= ~(1 << i);
       }
 
-      const rest = solve(newMask);
-      if (rest === null) continue;
+      for (const groupType of typesToTry) {
+        const price = lookupPrice(groupType, totalCost, years);
+        if (price === null) continue;
 
-      const totalPrice = price + rest.total;
-      if (best === null || totalPrice < best.total) {
-        best = {
-          total: totalPrice,
-          groups: [
-            {
-              appliances: groupAppliances,
-              groupType,
-              groupLabel: GROUP_LABELS[groupType],
-              totalCost,
-              price,
-              bracket: getBracket(groupType, totalCost),
-            },
-            ...rest.groups,
-          ],
-        };
+        const rest = solve(newMask);
+        if (rest === null) continue;
+
+        const totalPrice = price + rest.total;
+        if (best === null || totalPrice < best.total) {
+          best = {
+            total: totalPrice,
+            groups: [
+              {
+                appliances: groupAppliances,
+                groupType,
+                groupLabel: GROUP_LABELS[groupType],
+                totalCost,
+                price,
+                bracket: getBracket(groupType, totalCost),
+              },
+              ...rest.groups,
+            ],
+          };
+        }
       }
     }
 
@@ -277,130 +246,179 @@ function exhaustiveSearch(appliances, years) {
 }
 
 /**
- * Generate all non-empty subsets of an array of indices.
- * For performance, limits group size to reasonable bounds.
+ * Generate non-empty subsets of an array of indices.
+ * For performance, caps the maximum group size at 10 when there are many items,
+ * since groups larger than ~10 rarely fall within pricing brackets.
  */
 function getSubsets(indices) {
   const result = [];
   const n = indices.length;
+  const maxGroupSize = n <= 12 ? n : Math.min(n, 10);
 
-  // Generate subsets up to full size but cap at 20 for performance
-  const limit = Math.min(n, 20);
-  const total = 1 << limit;
-
-  for (let mask = 1; mask < total; mask++) {
-    const subset = [];
-    for (let i = 0; i < limit; i++) {
-      if (mask & (1 << i)) {
-        subset.push(indices[i]);
+  // For small n, enumerate all subsets via bitmask
+  if (n <= 16) {
+    const total = 1 << n;
+    for (let mask = 1; mask < total; mask++) {
+      const subset = [];
+      for (let i = 0; i < n; i++) {
+        if (mask & (1 << i)) subset.push(indices[i]);
       }
+      if (subset.length <= maxGroupSize) result.push(subset);
     }
-    result.push(subset);
+    return result;
   }
 
+  // For larger n, generate subsets up to maxGroupSize using combinations
+  for (let size = 1; size <= maxGroupSize; size++) {
+    generateCombinations(indices, size, 0, [], result);
+  }
   return result;
 }
 
+function generateCombinations(indices, size, start, current, result) {
+  if (current.length === size) {
+    result.push([...current]);
+    return;
+  }
+  for (let i = start; i < indices.length; i++) {
+    current.push(indices[i]);
+    generateCombinations(indices, size, i + 1, current, result);
+    current.pop();
+  }
+}
+
 /**
- * Greedy approach for larger sets: sort by cost, try to form optimal groups.
+ * Greedy approach for larger sets.
+ * Iteratively finds the most beneficial group from remaining items
+ * until no more beneficial groupings exist, then prices the rest individually.
  */
 function greedySearch(appliances, years) {
-  // Sort descending by cost to prioritize grouping expensive items
   const sorted = [...appliances].sort((a, b) => b.cost - a.cost);
   const used = new Set();
   const groups = [];
   let total = 0;
 
-  // First pass: try to form 3+ groups (often best value for bundles)
-  for (let size = sorted.length; size >= 3; size--) {
-    for (let i = 0; i <= sorted.length - size; i++) {
-      if (used.has(i)) continue;
-
-      const candidates = [i];
-      for (let j = i + 1; j < sorted.length && candidates.length < size; j++) {
-        if (!used.has(j)) candidates.push(j);
-      }
-
-      if (candidates.length < size) continue;
-
-      const groupAppliances = candidates.map((idx) => sorted[idx]);
-      const totalCost = groupAppliances.reduce((s, a) => s + a.cost, 0);
-      const price3plus = lookupPrice(GROUP_TYPES.TRIPLE_PLUS, totalCost, years);
-
-      // Compare to breaking into smaller groups
-      let individualSum = 0;
-      let allValid = true;
-      for (const app of groupAppliances) {
-        const p = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
-        if (p === null) {
-          allValid = false;
-          break;
-        }
-        individualSum += p;
-      }
-
-      if (price3plus !== null && (!allValid || price3plus < individualSum)) {
-        for (const idx of candidates) used.add(idx);
-        total += price3plus;
-        groups.push({
-          appliances: groupAppliances,
-          groupType: GROUP_TYPES.TRIPLE_PLUS,
-          groupLabel: GROUP_LABELS[GROUP_TYPES.TRIPLE_PLUS],
-          totalCost,
-          price: price3plus,
-          bracket: getBracket(GROUP_TYPES.TRIPLE_PLUS, totalCost),
-        });
-        break;
+  // Pre-compute individual prices for each appliance
+  function getIndividualPrice(app) {
+    let best = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+    if (app.isSmall) {
+      const smallPrice = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
+      if (smallPrice !== null && (best === null || smallPrice < best)) {
+        best = smallPrice;
       }
     }
+    return best;
   }
 
-  // Second pass: try pairs
-  for (let i = 0; i < sorted.length; i++) {
-    if (used.has(i)) continue;
-    for (let j = i + 1; j < sorted.length; j++) {
-      if (used.has(j)) continue;
+  // Iteratively find the best beneficial group from remaining items
+  let foundGroup = true;
+  while (foundGroup) {
+    foundGroup = false;
+    const remaining = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (!used.has(i)) remaining.push(i);
+    }
+    if (remaining.length < 2) break;
 
-      const pair = [sorted[i], sorted[j]];
-      const pairCost = pair[0].cost + pair[1].cost;
-      const pairPrice = lookupPrice(GROUP_TYPES.DOUBLE, pairCost, years);
+    let bestGroup = null;
+    let bestSavings = 0;
 
-      const single1 = lookupPrice(GROUP_TYPES.SINGLE, pair[0].cost, years);
-      const single2 = lookupPrice(GROUP_TYPES.SINGLE, pair[1].cost, years);
+    // Try 3+ groups: take consecutive unused items (sorted by cost)
+    for (let size = Math.min(remaining.length, 10); size >= 3; size--) {
+      for (let start = 0; start <= remaining.length - size; start++) {
+        const candidates = remaining.slice(start, start + size);
+        const groupAppliances = candidates.map((idx) => sorted[idx]);
+        const groupCost = groupAppliances.reduce((s, a) => s + a.cost, 0);
+        const price = lookupPrice(GROUP_TYPES.TRIPLE_PLUS, groupCost, years);
+        if (price === null) continue;
 
-      if (pairPrice !== null && single1 !== null && single2 !== null) {
-        if (pairPrice < single1 + single2) {
-          used.add(i);
-          used.add(j);
-          total += pairPrice;
-          groups.push({
+        let individualSum = 0;
+        let allValid = true;
+        for (const app of groupAppliances) {
+          const p = getIndividualPrice(app);
+          if (p === null) { allValid = false; break; }
+          individualSum += p;
+        }
+
+        const savings = allValid ? individualSum - price : Infinity;
+        if (savings > bestSavings) {
+          bestSavings = savings;
+          bestGroup = {
+            indices: candidates,
+            appliances: groupAppliances,
+            groupType: GROUP_TYPES.TRIPLE_PLUS,
+            totalCost: groupCost,
+            price,
+          };
+        }
+      }
+    }
+
+    // Try pairs
+    for (let i = 0; i < remaining.length; i++) {
+      for (let j = i + 1; j < remaining.length; j++) {
+        const pair = [sorted[remaining[i]], sorted[remaining[j]]];
+        const pairCost = pair[0].cost + pair[1].cost;
+        const pairPrice = lookupPrice(GROUP_TYPES.DOUBLE, pairCost, years);
+        if (pairPrice === null) continue;
+
+        const p1 = getIndividualPrice(pair[0]);
+        const p2 = getIndividualPrice(pair[1]);
+        if (p1 === null || p2 === null) continue;
+
+        const savings = (p1 + p2) - pairPrice;
+        if (savings > bestSavings) {
+          bestSavings = savings;
+          bestGroup = {
+            indices: [remaining[i], remaining[j]],
             appliances: pair,
             groupType: GROUP_TYPES.DOUBLE,
-            groupLabel: GROUP_LABELS[GROUP_TYPES.DOUBLE],
             totalCost: pairCost,
             price: pairPrice,
-            bracket: getBracket(GROUP_TYPES.DOUBLE, pairCost),
-          });
-          break;
+          };
         }
       }
     }
+
+    if (bestGroup && bestSavings > 0) {
+      for (const idx of bestGroup.indices) used.add(idx);
+      total += bestGroup.price;
+      groups.push({
+        appliances: bestGroup.appliances,
+        groupType: bestGroup.groupType,
+        groupLabel: GROUP_LABELS[bestGroup.groupType],
+        totalCost: bestGroup.totalCost,
+        price: bestGroup.price,
+        bracket: getBracket(bestGroup.groupType, bestGroup.totalCost),
+      });
+      foundGroup = true;
+    }
   }
 
-  // Remaining: individual
+  // Remaining: individual pricing
   for (let i = 0; i < sorted.length; i++) {
     if (used.has(i)) continue;
     const app = sorted[i];
-    const price = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+    let groupType = GROUP_TYPES.SINGLE;
+    let price = lookupPrice(GROUP_TYPES.SINGLE, app.cost, years);
+
+    if (app.isSmall) {
+      const smallPrice = lookupPrice(GROUP_TYPES.SMALL, app.cost, years);
+      if (smallPrice !== null && (price === null || smallPrice < price)) {
+        groupType = GROUP_TYPES.SMALL;
+        price = smallPrice;
+      }
+    }
+
     if (price !== null) {
       total += price;
       groups.push({
         appliances: [app],
-        groupType: GROUP_TYPES.SINGLE,
-        groupLabel: GROUP_LABELS[GROUP_TYPES.SINGLE],
+        groupType,
+        groupLabel: GROUP_LABELS[groupType],
         totalCost: app.cost,
         price,
-        bracket: getBracket(GROUP_TYPES.SINGLE, app.cost),
+        bracket: getBracket(groupType, app.cost),
       });
     } else {
       return null;
