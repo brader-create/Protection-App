@@ -281,13 +281,17 @@ export default function DocumentUpload({ onParsedItems }) {
     const items = [];
     const seenModels = new Set();
 
-    // Scan the entire text for price patterns: digits ending in .00 format
-    // Each match anchors a potential appliance line
-    const pricePattern = /(\d[\d,]*\.\d{2})/g;
+    // Scan for standalone prices: must have a dot with exactly 2 decimal digits
+    // Must be preceded by whitespace (or start) and followed by whitespace (or end)
+    // This avoids matching account numbers, dates, or other digit strings
+    const pricePattern = /(?<=\s|^)(\d{1,3}(?:,?\d{3})*\.\d{2})(?=\s|$)/g;
     let priceMatch;
 
     while ((priceMatch = pricePattern.exec(text)) !== null) {
-      const cost = parseFloat(priceMatch[1].replace(/,/g, ''));
+      const priceStr = priceMatch[1];
+      // Extra safety: must contain a dot (real price like 1585.98, not 5207585)
+      if (!priceStr.includes('.')) continue;
+      const cost = parseFloat(priceStr.replace(/,/g, ''));
       if (isNaN(cost) || cost < 50) continue;
 
       // Grab the text before this price (up to 300 chars back)
