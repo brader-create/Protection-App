@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import ApplianceForm from './components/ApplianceForm';
 import ApplianceList from './components/ApplianceList';
 import DocumentUpload from './components/DocumentUpload';
@@ -8,41 +8,69 @@ import { WARRANTY_YEARS } from './data/warrantyPricing';
 
 export default function App() {
   const [appliances, setAppliances] = useState([]);
-  const [allResults, setAllResults] = useState(null);
-  const [activeYear, setActiveYear] = useState(3);
+  const [activeYear, setActiveYear] = useState(4);
   const [inputMode, setInputMode] = useState('manual');
   const [calculating, setCalculating] = useState(false);
   const [excludedIds, setExcludedIds] = useState(new Set());
   const [save3Active, setSave3Active] = useState(false);
   const [save3Exclusions, setSave3Exclusions] = useState(new Set());
 
+  // Progressive results: built year-by-year
+  const [normalByYear, setNormalByYear] = useState({});
+  const [save3ByYear, setSave3ByYear] = useState({});
+  const [save3OrigByYear, setSave3OrigByYear] = useState({});
+  const [productSavings, setProductSavings] = useState(0);
+  const [precomputing, setPrecomputing] = useState(false);
+  const [hasResults, setHasResults] = useState(false);
+
+  const calcIdRef = useRef(0);
+
+  // Derive the displayed allResults from state
+  const allResults = useMemo(() => {
+    const byYear = save3Active ? save3ByYear : normalByYear;
+    if (Object.keys(byYear).length === 0) return null;
+    return {
+      byYear,
+      originalByYear: save3Active && Object.keys(save3OrigByYear).length > 0 ? save3OrigByYear : null,
+      productSavings: save3Active ? productSavings : 0,
+    };
+  }, [normalByYear, save3ByYear, save3OrigByYear, save3Active, productSavings]);
+
+  function clearResults() {
+    setNormalByYear({});
+    setSave3ByYear({});
+    setSave3OrigByYear({});
+    setProductSavings(0);
+    setHasResults(false);
+  }
+
   function addAppliance(appliance) {
     setAppliances((prev) => [...prev, appliance]);
-    setAllResults(null);
+    clearResults();
   }
 
   function removeAppliance(id) {
     setAppliances((prev) => prev.filter((a) => a.id !== id));
     setExcludedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     setSave3Exclusions((prev) => { const n = new Set(prev); n.delete(id); return n; });
-    setAllResults(null);
+    clearResults();
   }
 
   function updateAppliance(id, updates) {
     setAppliances((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
-    setAllResults(null);
+    clearResults();
   }
 
   function addParsedItems(items) {
     setAppliances((prev) => [...prev, ...items]);
-    setAllResults(null);
+    clearResults();
   }
 
   function clearAll() {
     setAppliances([]);
     setExcludedIds(new Set());
     setSave3Exclusions(new Set());
-    setAllResults(null);
+    clearResults();
   }
 
   function toggleAppliance(id) {
@@ -51,61 +79,157 @@ export default function App() {
       if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
-    setAllResults(null);
+    clearResults();
   }
 
+  // Refs for accessing latest state in async callbacks
+  const appliancesRef = useRef(appliances);
+  const excludedIdsRef = useRef(excludedIds);
+  const save3ActiveRef = useRef(save3Active);
+  const save3ExclusionsRef = useRef(save3Exclusions);
+  useEffect(() => { appliancesRef.current = appliances; }, [appliances]);
+  useEffect(() => { excludedIdsRef.current = excludedIds; }, [excludedIds]);
+  useEffect(() => { save3ActiveRef.current = save3Active; }, [save3Active]);
+  useEffect(() => { save3ExclusionsRef.current = save3Exclusions; }, [save3Exclusions]);
+
+  // Progressive calculation: one year at a time (4→3→2)
+  const runProgressiveCalc = useCallback((opts = {}) => {
+    const { forSave3 = false, pregenerate = false } = opts;
+    const apps = appliancesRef.current;
+    const excluded = excludedIdsRef.current;
+    const s3Exclusions = save3ExclusionsRef.current;
+
+    const active = apps.filter((a) => !excluded.has(a.id));
+    if (active.length === 0) return;
+
+    const id = ++calcIdRef.current;
+
+    if (!pregenerate) {
+      setCalculating(true);
+      if (forSave3) {
+        setSave3ByYear({});
+        setSave3OrigByYear({});
+      } else {
+        setNormalByYear({});
+      }
+    } else {
+      setPrecomputing(true);
+    }
+
+    const prepared = forSave3 || pregenerate
+      ? active.map((a) => {
+          const discounted = pregenerate || !s3Exclusions.has(a.id);
+          return {
+            ...a,
+            originalCost: a.cost,
+            cost: discounted ? Math.round(a.cost * 0.97 * 100) / 100 : a.cost,
+          };
+        })
+      : active;
+
+    if (forSave3 || pregenerate) {
+      const origTotal = active.reduce((s, a) => s + a.cost, 0);
+      const discTotal = prepared.reduce((s, a) => s + a.cost, 0);
+      setProductSavings(origTotal - discTotal);
+    }
+
+    const years = [4, 3, 2];
+    let idx = 0;
+
+    function computeNext() {
+      if (calcIdRef.current !== id) return; // cancelled
+      if (idx >= years.length) {
+        if (!pregenerate) {
+          setCalculating(false);
+          setHasResults(true);
+          // After normal calc done, pre-generate 3% in background
+          if (!forSave3) {
+            runProgressiveCalc({ pregenerate: true });
+          }
+        } else {
+          setPrecomputing(false);
+        }
+        return;
+      }
+
+      const yr = years[idx];
+      const result = calculateAll(prepared, yr);
+
+      if (forSave3 || pregenerate) {
+        if (pregenerate) {
+          setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
+        } else {
+          setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
+        }
+        const origResult = calculateAll(active, yr);
+        setSave3OrigByYear((prev) => ({ ...prev, [yr]: origResult }));
+      } else {
+        setNormalByYear((prev) => ({ ...prev, [yr]: result }));
+      }
+
+      idx++;
+      setTimeout(computeNext, 15);
+    }
+
+    setTimeout(computeNext, 15);
+  }, []);
+
+  function handleCalculate() {
+    const active = appliances.filter((a) => !excludedIds.has(a.id));
+    if (active.length === 0) return;
+
+    clearResults();
+    setActiveYear(4);
+
+    if (save3Active) {
+      runProgressiveCalc({ forSave3: true });
+    } else {
+      runProgressiveCalc({ forSave3: false });
+    }
+  }
+
+  // Auto-recalculate when save3 toggles (if results exist)
   function toggleSave3() {
-    setSave3Active((prev) => !prev);
+    const wasActive = save3Active;
+    const nowActive = !wasActive;
+    setSave3Active(nowActive);
     setSave3Exclusions(new Set());
-    setAllResults(null);
+
+    if (hasResults || Object.keys(normalByYear).length > 0) {
+      if (nowActive) {
+        // Check if we have pre-computed 3% cache ready
+        if (Object.keys(save3ByYear).length === 3) {
+          // Cache is ready — just switch display (useMemo handles it)
+          return;
+        }
+        // Need to compute — will be triggered by effect below
+      }
+      // Turning off — normalByYear is already there, useMemo switches instantly
+    }
   }
 
+  // Auto-recalculate when save3 per-item exclusion changes
   function toggleSave3ForItem(id) {
     setSave3Exclusions((prev) => {
       const n = new Set(prev);
       if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
-    setAllResults(null);
+    // Need to recompute save3 results with new exclusions
+    if (hasResults && save3Active) {
+      // Small delay to let state update
+      setTimeout(() => {
+        runProgressiveCalc({ forSave3: true });
+      }, 20);
+    }
   }
 
-  function handleCalculate() {
-    const active = appliances.filter((a) => !excludedIds.has(a.id));
-    if (active.length === 0) return;
-
-    setCalculating(true);
-    setAllResults(null);
-
-    setTimeout(() => {
-      const prepared = active.map((a) => {
-        const discounted = save3Active && !save3Exclusions.has(a.id);
-        return {
-          ...a,
-          originalCost: a.cost,
-          cost: discounted ? Math.round(a.cost * 0.97 * 100) / 100 : a.cost,
-        };
-      });
-
-      const byYear = {};
-      const originalByYear = {};
-      for (const yr of WARRANTY_YEARS) {
-        byYear[yr] = calculateAll(prepared, yr);
-        if (save3Active) {
-          originalByYear[yr] = calculateAll(active, yr);
-        }
-      }
-
-      const originalTotal = active.reduce((s, a) => s + a.cost, 0);
-      const discountedTotal = prepared.reduce((s, a) => s + a.cost, 0);
-
-      setAllResults({
-        byYear,
-        originalByYear: save3Active ? originalByYear : null,
-        productSavings: originalTotal - discountedTotal,
-      });
-      setCalculating(false);
-    }, 50);
-  }
+  // Auto-recalculate when save3 is turned on and no cache exists
+  useEffect(() => {
+    if (save3Active && hasResults && Object.keys(save3ByYear).length < 3 && !calculating) {
+      runProgressiveCalc({ forSave3: true });
+    }
+  }, [save3Active, hasResults, calculating, runProgressiveCalc]);
 
   const activeCount = appliances.filter((a) => !excludedIds.has(a.id)).length;
 
@@ -216,6 +340,9 @@ export default function App() {
                   ON
                 </span>
               )}
+              {precomputing && !save3Active && (
+                <div className="w-3 h-3 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" title="Pre-generating 3% results..." />
+              )}
             </label>
           </div>
 
@@ -250,6 +377,7 @@ export default function App() {
                 onYearChange={setActiveYear}
                 appliances={appliances.filter((a) => !excludedIds.has(a.id))}
                 save3Active={save3Active}
+                calculating={calculating}
               />
             </div>
           </div>
