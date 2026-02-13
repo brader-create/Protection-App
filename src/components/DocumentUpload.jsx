@@ -274,87 +274,93 @@ export default function DocumentUpload({ onParsedItems }) {
 
   /**
    * Parse invoice-style PDFs.
-   * Simple approach: find every price (0000.00), check left for warehouse code (XX99),
-   * then check for model at start of that segment. No warehouse + model = skip.
+   * Same logic that worked before: find MODEL header, then match model tokens
+   * followed by description and price. Only change: process each page separately
+   * so SUBTOTAL on page 1 doesn't cut off page 2 items.
    */
   function parseInvoiceText(text) {
     const items = [];
     const seenModels = new Set();
 
-    // Scan for standalone prices: must have a dot with exactly 2 decimal digits
-    // Must be preceded by whitespace (or start) and followed by whitespace (or end)
-    // This avoids matching account numbers, dates, or other digit strings
-    const pricePattern = /(?<=\s|^)(\d{1,3}(?:,?\d{3})*\.\d{2})(?=\s|$)/g;
-    let priceMatch;
+    // Skip patterns for non-appliance lines
+    const skipPattern = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
 
-    while ((priceMatch = pricePattern.exec(text)) !== null) {
-      const priceStr = priceMatch[1];
-      // Extra safety: must contain a dot (real price like 1585.98, not 5207585)
-      if (!priceStr.includes('.')) continue;
-      const cost = parseFloat(priceStr.replace(/,/g, ''));
-      if (isNaN(cost) || cost < 50) continue;
+    // Process each page separately (pages joined with \n in parsePDF)
+    const pages = text.split('\n');
 
-      // Grab the text before this price (up to 300 chars back)
-      const startPos = Math.max(0, priceMatch.index - 300);
-      const beforePrice = text.substring(startPos, priceMatch.index).trim();
+    for (const pageText of pages) {
+      // Find the header on this page
+      const headerMatch = pageText.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
+      if (!headerMatch) continue;
 
-      // Must have a warehouse code (XX99 like IE27, AB12) right before the price
-      // Pattern: warehouse code, then spaces, then we're at the price
-      const warehouseMatch = beforePrice.match(/([A-Z]{2}\d{2})\s*$/);
-      if (!warehouseMatch) continue;
+      const afterHeader = pageText.substring(headerMatch.index + headerMatch[0].length);
 
-      // Get everything before the warehouse code
-      const beforeWarehouse = beforePrice.substring(0, warehouseMatch.index).trim();
+      // Stop at summary lines on THIS page only
+      const stopPattern = /\b(?:SUBTOTAL|SUB\s*TOTAL|TOTAL|SALES\s*TAX|HST|GST|AMOUNT\s*DUE|PROTECTED\s*ITEMS?)\b/i;
+      const stopMatch = stopPattern.exec(afterHeader);
+      const itemSection = stopMatch ? afterHeader.substring(0, stopMatch.index) : afterHeader;
 
-      // Strip trailing qty digit(s) — the qty sits between description and warehouse
-      const beforeQty = beforeWarehouse.replace(/\s+\d+\s*$/, '').trim();
-      if (!beforeQty) continue;
+      // Strategy 1: model token + middle text + price
+      const linePattern = /(?:^|\s{2,}|\n)([A-Z]{2,}[A-Z0-9\-\/]*\d[A-Z0-9\-\/]*)\s+(.+?)(\$?\s*[\d,]+\.\d{2})/g;
+      let lineMatch;
 
-      // Now find the model: work backwards to find the start of this "line"
-      // A previous price ending marks the boundary of the previous item
-      // Look for the last price-like pattern in beforeQty to find where this line starts
-      let lineText = beforeQty;
-      const prevBoundary = beforeQty.match(/.*\d+\.\d{2}\s+/);
-      if (prevBoundary) {
-        lineText = beforeQty.substring(prevBoundary[0].length);
+      while ((lineMatch = linePattern.exec(itemSection)) !== null) {
+        const modelCandidate = lineMatch[1].trim();
+        const middleText = lineMatch[2].trim();
+        const priceStr = lineMatch[3].trim();
+
+        if (!isValidModel(modelCandidate)) continue;
+        if (skipPattern.test(middleText) || skipPattern.test(modelCandidate)) continue;
+        if (seenModels.has(modelCandidate)) continue;
+
+        const cost = parseFloat(priceStr.replace(/[$,\s]/g, ''));
+        if (isNaN(cost) || cost <= 0 || cost < 50) continue;
+
+        seenModels.add(modelCandidate);
+        const description = cleanDescription(middleText);
+
+        items.push({
+          id: crypto.randomUUID(),
+          model: modelCandidate,
+          cost,
+          isSmall: false,
+          description,
+          _source: 'Invoice',
+        });
       }
 
-      // Also skip past "ORDERED" text that follows table headers
-      const orderedIdx = lineText.lastIndexOf('ORDERED');
-      if (orderedIdx >= 0) {
-        lineText = lineText.substring(orderedIdx + 7).trim();
+      // Strategy 2: fallback — find model tokens and nearest price after
+      if (items.length === 0) {
+        const tokenPattern = /\b([A-Z]{2,}[A-Z0-9\-]{2,}\d[A-Z0-9\-]*)\b/g;
+        let tokenMatch;
+
+        while ((tokenMatch = tokenPattern.exec(itemSection)) !== null) {
+          const model = tokenMatch[1];
+          if (!isValidModel(model)) continue;
+          if (seenModels.has(model)) continue;
+
+          const afterModel = itemSection.substring(tokenMatch.index + model.length, tokenMatch.index + model.length + 300);
+          const priceMatch = afterModel.match(/^(.+?)\$?\s*([\d,]+\.\d{2})/);
+          if (!priceMatch) continue;
+
+          const descText = priceMatch[1].trim();
+          const cost = parseFloat(priceMatch[2].replace(/,/g, ''));
+          if (isNaN(cost) || cost <= 0 || cost < 50) continue;
+          if (skipPattern.test(descText)) continue;
+
+          seenModels.add(model);
+          const description = cleanDescription(descText);
+
+          items.push({
+            id: crypto.randomUUID(),
+            model,
+            cost,
+            isSmall: false,
+            description,
+            _source: 'Invoice',
+          });
+        }
       }
-
-      lineText = lineText.trim();
-      if (!lineText) continue;
-
-      // First token is the model
-      const tokens = lineText.split(/\s+/);
-      const modelCandidate = tokens[0];
-
-      // Must be a valid model number
-      if (!isValidModel(modelCandidate)) continue;
-
-      // Skip duplicates
-      if (seenModels.has(modelCandidate)) continue;
-      seenModels.add(modelCandidate);
-
-      // Description is everything between model and qty/warehouse
-      const descText = tokens.slice(1).join(' ').trim();
-
-      // Skip services/accessories by description
-      if (/(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|labour|labor|service\s*call|haul\s*away)/i.test(descText)) continue;
-
-      const description = cleanDescription(descText);
-
-      items.push({
-        id: crypto.randomUUID(),
-        model: modelCandidate,
-        cost,
-        isSmall: false,
-        description,
-        _source: 'Invoice',
-      });
     }
 
     return items;
