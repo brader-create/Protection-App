@@ -11,6 +11,7 @@ export default function App() {
   const [years, setYears] = useState(3);
   const [results, setResults] = useState(null);
   const [inputMode, setInputMode] = useState('manual');
+  const [calculating, setCalculating] = useState(false);
 
   function addAppliance(appliance) {
     setAppliances((prev) => [...prev, appliance]);
@@ -34,8 +35,14 @@ export default function App() {
 
   function handleCalculate() {
     if (appliances.length === 0) return;
-    const result = calculateAll(appliances, years);
-    setResults(result);
+    setCalculating(true);
+    setResults(null);
+    // Defer to let the spinner render before heavy computation
+    setTimeout(() => {
+      const result = calculateAll(appliances, years);
+      setResults(result);
+      setCalculating(false);
+    }, 50);
   }
 
   function handleYearChange(newYears) {
@@ -65,7 +72,6 @@ export default function App() {
             </div>
           </div>
 
-          <YearSelector selected={years} onChange={handleYearChange} />
         </div>
       </header>
 
@@ -135,22 +141,32 @@ export default function App() {
           </div>
         </div>
 
-        {/* Calculate Button */}
-        <div className="flex justify-center">
+        {/* Coverage Term + Calculate */}
+        <div className="flex flex-col items-center gap-4">
+          <YearSelector selected={years} onChange={handleYearChange} />
           <button
             onClick={handleCalculate}
-            disabled={appliances.length === 0}
+            disabled={appliances.length === 0 || calculating}
             className="btn-primary text-lg px-10 py-4 flex items-center gap-3"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-              />
-            </svg>
-            Calculate Warranty Pricing
+            {calculating ? (
+              <>
+                <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                Calculating...
+              </>
+            ) : (
+              <>
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                  />
+                </svg>
+                Calculate Warranty Pricing
+              </>
+            )}
           </button>
         </div>
 

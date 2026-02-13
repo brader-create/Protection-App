@@ -1,5 +1,5 @@
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { calculateAll } from './calculator';
 import { WARRANTY_YEARS } from '../data/warrantyPricing';
 
@@ -18,7 +18,7 @@ export function generateComparisonPDF(appliances) {
   let y = margin;
 
   // --- Header ---
-  doc.setFillColor(15, 23, 42); // slate-950
+  doc.setFillColor(15, 23, 42);
   doc.rect(0, 0, pageWidth, 38, 'F');
 
   doc.setTextColor(255, 255, 255);
@@ -28,7 +28,7 @@ export function generateComparisonPDF(appliances) {
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(148, 163, 184); // slate-400
+  doc.setTextColor(148, 163, 184);
   doc.text('Pricing Comparison', margin, 26);
 
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -37,7 +37,7 @@ export function generateComparisonPDF(appliances) {
   y = 46;
 
   // --- Appliance List ---
-  doc.setTextColor(30, 41, 59); // slate-800
+  doc.setTextColor(30, 41, 59);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.text('Appliances Covered', margin, y);
@@ -52,7 +52,7 @@ export function generateComparisonPDF(appliances) {
   const totalCost = appliances.reduce((sum, a) => sum + a.cost, 0);
   applianceRows.push(['', 'Total', formatPrice(totalCost)]);
 
-  doc.autoTable({
+  let tableResult = autoTable(doc, {
     startY: y,
     head: [['#', 'Model / Description', 'Cost']],
     body: applianceRows,
@@ -63,7 +63,7 @@ export function generateComparisonPDF(appliances) {
       textColor: [30, 41, 59],
     },
     headStyles: {
-      fillColor: [51, 65, 85], // slate-700
+      fillColor: [51, 65, 85],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       fontSize: 8,
@@ -74,15 +74,14 @@ export function generateComparisonPDF(appliances) {
       2: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
     },
     didParseCell: (data) => {
-      // Bold the total row
       if (data.row.index === applianceRows.length - 1) {
         data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [241, 245, 249]; // slate-100
+        data.cell.styles.fillColor = [241, 245, 249];
       }
     },
   });
 
-  y = doc.lastAutoTable.finalY + 10;
+  y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 30) + 10;
 
   // --- Calculate for all years ---
   const allResults = {};
@@ -113,7 +112,6 @@ export function generateComparisonPDF(appliances) {
     return row;
   });
 
-  // Find best price per year
   const bestPerYear = {};
   for (const yr of WARRANTY_YEARS) {
     let best = null;
@@ -126,7 +124,7 @@ export function generateComparisonPDF(appliances) {
     bestPerYear[yr] = best;
   }
 
-  doc.autoTable({
+  tableResult = autoTable(doc, {
     startY: y,
     head: [['Strategy', '2-Year', '3-Year', '4-Year']],
     body: comparisonRows,
@@ -154,19 +152,19 @@ export function generateComparisonPDF(appliances) {
         const key = strategies[data.row.index];
         const r = allResults[yr]?.[key];
         if (r?.valid && bestPerYear[yr] !== null && r.total === bestPerYear[yr]) {
-          data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+          data.cell.styles.textColor = [5, 150, 105];
           data.cell.styles.fontStyle = 'bold';
         }
       }
     },
   });
 
-  y = doc.lastAutoTable.finalY + 8;
+  y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 30) + 8;
 
   // --- Best Price Summary ---
-  doc.setFillColor(236, 253, 245); // emerald-50
+  doc.setFillColor(236, 253, 245);
   doc.roundedRect(margin, y, pageWidth - margin * 2, 20, 3, 3, 'F');
-  doc.setDrawColor(16, 185, 129); // emerald-500
+  doc.setDrawColor(16, 185, 129);
   doc.roundedRect(margin, y, pageWidth - margin * 2, 20, 3, 3, 'S');
 
   doc.setFontSize(9);
@@ -185,12 +183,11 @@ export function generateComparisonPDF(appliances) {
 
   // --- Breakdown for each year (if space allows) ---
   for (const yr of WARRANTY_YEARS) {
-    if (y > 250) break; // Don't overflow the page
+    if (y > 250) break;
 
     const result = allResults[yr];
     if (!result) continue;
 
-    // Find the best strategy for this year
     let bestKey = null;
     let bestTotal = null;
     for (const key of strategies) {
@@ -216,7 +213,7 @@ export function generateComparisonPDF(appliances) {
       formatPrice(item.price),
     ]);
 
-    doc.autoTable({
+    tableResult = autoTable(doc, {
       startY: y,
       head: [['Group', 'Appliances', 'Price']],
       body: breakdownRows,
@@ -227,7 +224,7 @@ export function generateComparisonPDF(appliances) {
         textColor: [71, 85, 105],
       },
       headStyles: {
-        fillColor: [226, 232, 240], // slate-200
+        fillColor: [226, 232, 240],
         textColor: [51, 65, 85],
         fontStyle: 'bold',
         fontSize: 7.5,
@@ -239,7 +236,7 @@ export function generateComparisonPDF(appliances) {
       },
     });
 
-    y = doc.lastAutoTable.finalY + 6;
+    y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 20) + 6;
   }
 
   // --- Footer ---
@@ -247,6 +244,5 @@ export function generateComparisonPDF(appliances) {
   doc.setTextColor(148, 163, 184);
   doc.text('Warranty List Options 6.0 — Protection Plan Calculator', pageWidth / 2, 287, { align: 'center' });
 
-  // Save
   doc.save('warranty-comparison.pdf');
 }
