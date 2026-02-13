@@ -2,6 +2,7 @@ import {
   GROUP_TYPES,
   GROUP_LABELS,
   WARRANTY_YEARS,
+  PRICING,
   lookupPrice,
   getBracket,
   GROUP_APPLIANCE_COUNTS,
@@ -459,5 +460,47 @@ export function calculateAll(appliances, years) {
     bestMix: { ...bestMix, isCheapest: bestMix.valid && bestMix.total === cheapest },
     cheapestPrice: cheapest,
     years,
+  };
+}
+
+/**
+ * Analyze how close a group's cost is to a cheaper bracket boundary.
+ * Returns info about potential savings if cost were reduced.
+ */
+export function analyzeBracketProximity(groupType, totalCost, years) {
+  const brackets = PRICING[groupType];
+  if (!brackets) return null;
+
+  const yearIndex = WARRANTY_YEARS.indexOf(years);
+  if (yearIndex === -1) return null;
+
+  let currentIdx = -1;
+  for (let i = 0; i < brackets.length; i++) {
+    if (totalCost >= brackets[i][0] && totalCost <= brackets[i][1]) {
+      currentIdx = i;
+      break;
+    }
+  }
+
+  if (currentIdx <= 0) return null; // already in lowest bracket or not found
+
+  const currentPrice = brackets[currentIdx][2 + yearIndex];
+  const lowerBracket = brackets[currentIdx - 1];
+  const lowerPrice = lowerBracket[2 + yearIndex];
+
+  if (lowerPrice >= currentPrice) return null; // no savings
+
+  const reduceBy = totalCost - lowerBracket[1];
+  if (reduceBy <= 0) return null;
+
+  return {
+    reduceBy,
+    currentPrice,
+    lowerPrice,
+    saving: currentPrice - lowerPrice,
+    targetMax: lowerBracket[1],
+    bracketMax: brackets[currentIdx][1],
+    bracketMin: brackets[currentIdx][0],
+    positionInBracket: (totalCost - brackets[currentIdx][0]) / (brackets[currentIdx][1] - brackets[currentIdx][0]),
   };
 }

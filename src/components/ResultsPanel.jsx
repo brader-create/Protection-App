@@ -1,13 +1,43 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { WARRANTY_YEARS } from '../data/warrantyPricing';
 import { generateComparisonPDF } from '../utils/pdfExport';
+import { analyzeBracketProximity } from '../utils/calculator';
 
 function formatPrice(price) {
   if (price === null || price === undefined) return '—';
   return '$' + price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function ResultCard({ result, cheapestPrice, originalResult, save3Active }) {
+function ThresholdMeter({ item, years }) {
+  const proximity = analyzeBracketProximity(item.groupType, item.totalCost, years);
+  if (!proximity || proximity.reduceBy > 500) return null; // Only show if within $500
+
+  const pct = Math.min(100, (proximity.reduceBy / 500) * 100);
+
+  return (
+    <div className="mt-2 pt-2 border-t border-slate-700/20">
+      <div className="flex items-center justify-between text-[10px] mb-1">
+        <span className="text-cyan-400">
+          ${proximity.reduceBy.toLocaleString('en-US', { minimumFractionDigits: 2 })} from cheaper bracket
+        </span>
+        <span className="text-cyan-300 font-semibold">
+          Save {formatPrice(proximity.saving)}
+        </span>
+      </div>
+      <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 rounded-full transition-all duration-500"
+          style={{ width: `${100 - pct}%` }}
+        />
+      </div>
+      <p className="text-[9px] text-slate-600 mt-0.5">
+        Target: ${proximity.targetMax.toLocaleString()} combined → {formatPrice(proximity.lowerPrice)}
+      </p>
+    </div>
+  );
+}
+
+function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds }) {
   const isBest = result.isCheapest && result.valid;
   const savings =
     result.valid && cheapestPrice !== null && result.total !== cheapestPrice
@@ -76,7 +106,12 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active }) {
                 <div className="space-y-0.5">
                   {item.appliances.map((app, j) => (
                     <div key={j} className="flex items-center justify-between text-xs text-slate-400">
-                      <span className="truncate mr-2">{app.model}</span>
+                      <div className="truncate mr-2">
+                        <span>{app.model}</span>
+                        {app.description && (
+                          <span className="text-slate-600 ml-1.5">{app.description}</span>
+                        )}
+                      </div>
                       <span className="tabular-nums shrink-0">
                         ${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </span>
@@ -91,6 +126,7 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active }) {
                     )}
                   </p>
                 )}
+                {showThresholds && <ThresholdMeter item={item} years={years} />}
               </div>
             ))}
           </div>
@@ -111,8 +147,17 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active }) {
   );
 }
 
-export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active }) {
+export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating }) {
   const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showThresholds, setShowThresholds] = useState(false);
+
+  // Progressive threshold reveal — show after a small delay
+  useEffect(() => {
+    setShowThresholds(false);
+    const timer = setTimeout(() => setShowThresholds(true), 600);
+    return () => clearTimeout(timer);
+  }, [allResults, activeYear]);
 
   if (!allResults) return null;
 
@@ -142,31 +187,111 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
     }, 50);
   }
 
+  function handleCopyEmail() {
+    const lines = [];
+
+    // Opening paragraph about warranty benefits
+    lines.push('Protect your investment with extended warranty coverage! Your appliances will be covered beyond the manufacturer\'s warranty, giving you peace of mind against unexpected repair costs and part failures.\n');
+
+    // For each year term, show best pricing
+    const yearData = [];
+    for (const yr of WARRANTY_YEARS) {
+      const yearResult = byYear[yr];
+      if (!yearResult) continue;
+
+      const individualTotal = yearResult.individual?.valid ? yearResult.individual.total : null;
+      const best = yearResult.cheapestPrice;
+      if (best === null) continue;
+
+      const totalYears = yr + 1; // warranty years + 1yr manufacturer
+      yearData.push({ yr, totalYears, individualTotal, best });
+    }
+
+    lines.push('Coverage options for your appliances:\n');
+
+    for (const { yr, totalYears, individualTotal, best } of yearData) {
+      let line = `\u2022 ${yr}-Year Protection (${totalYears} years total) \u2014 ${formatPrice(best)}`;
+      if (individualTotal !== null && individualTotal > best) {
+        line += ` (save ${formatPrice(individualTotal - best)} vs individual pricing)`;
+      }
+      // Mark the cheapest overall
+      const allBests = yearData.map((d) => d.best).filter(Boolean);
+      const overallMin = Math.min(...allBests);
+      if (best === overallMin && yearData.length > 1) {
+        line += ' \u2190 Best Value';
+      }
+      lines.push(line);
+    }
+
+    if (save3Active && totalSaved > 0) {
+      lines.push(`\nWith the Save 3% program, you save an additional ${formatPrice(totalSaved)} in total!`);
+    }
+
+    const text = lines.join('\n');
+
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }).catch(() => {
+      // Fallback: select text from a temp textarea
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-xl font-bold text-slate-100">Warranty Pricing Comparison</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {appliances && appliances.length > 0 && (
-            <button
-              onClick={handleDownloadPDF}
-              disabled={generating}
-              className="btn-secondary text-sm flex items-center gap-2"
-            >
-              {generating ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-slate-400/30 border-t-slate-300 rounded-full animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Download PDF
-                </>
-              )}
-            </button>
+            <>
+              <button
+                onClick={handleCopyEmail}
+                className="btn-secondary text-sm flex items-center gap-2"
+              >
+                {copied ? (
+                  <>
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    Copy for Email
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleDownloadPDF}
+                disabled={generating}
+                className="btn-secondary text-sm flex items-center gap-2"
+              >
+                {generating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-slate-400/30 border-t-slate-300 rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download PDF
+                  </>
+                )}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -177,22 +302,30 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
           const yearResult = byYear[yr];
           const isActive = yr === activeYear;
           const yearBest = yearResult?.cheapestPrice;
+          const isLoading = !yearResult && calculating;
           return (
             <button
               key={yr}
-              onClick={() => onYearChange(yr)}
+              onClick={() => yearResult && onYearChange(yr)}
+              disabled={!yearResult}
               className={`relative px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
                 isActive
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  : yearResult
+                    ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    : 'text-slate-600 cursor-not-allowed'
               }`}
             >
               <span className="block">{yr}-Year</span>
-              {yearBest !== null && yearBest !== undefined && (
+              {isLoading ? (
+                <div className="flex justify-center mt-1">
+                  <div className="w-3 h-3 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin" />
+                </div>
+              ) : yearBest !== null && yearBest !== undefined ? (
                 <span className={`block text-xs mt-0.5 tabular-nums ${isActive ? 'text-blue-200' : 'text-slate-500'}`}>
                   {formatPrice(yearBest)}
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}
@@ -242,18 +375,24 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
           cheapestPrice={cheapestPrice}
           originalResult={originalResults?.bestMix}
           save3Active={save3Active}
+          years={activeYear}
+          showThresholds={showThresholds}
         />
         <ResultCard
           result={singleBundle}
           cheapestPrice={cheapestPrice}
           originalResult={originalResults?.singleBundle}
           save3Active={save3Active}
+          years={activeYear}
+          showThresholds={showThresholds}
         />
         <ResultCard
           result={individual}
           cheapestPrice={cheapestPrice}
           originalResult={originalResults?.individual}
           save3Active={save3Active}
+          years={activeYear}
+          showThresholds={showThresholds}
         />
       </div>
     </div>

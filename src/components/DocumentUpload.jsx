@@ -64,21 +64,27 @@ export default function DocumentUpload({ onParsedItems }) {
         fullText += pageText + '\n';
       }
 
-      const items = parseQuoteText(fullText);
+      // Try quote parser first (parenthesized model numbers)
+      let items = parseQuoteText(fullText);
+
+      // Try invoice parser if quote didn't find anything
+      if (items.length === 0) {
+        items = parseInvoiceText(fullText);
+      }
+
+      // Fallback generic parser
+      if (items.length === 0) {
+        items = parseGenericText(fullText);
+      }
 
       if (items.length > 0) {
-        setParseResults({ success: true, message: `Found ${items.length} appliance(s) from PDF`, items });
+        const source = items[0]._source || 'PDF';
+        setParseResults({ success: true, message: `Found ${items.length} appliance(s) from ${source}`, items });
       } else {
-        // Fallback: try generic text parsing
-        const fallbackItems = parseGenericText(fullText);
-        if (fallbackItems.length > 0) {
-          setParseResults({ success: true, message: `Found ${fallbackItems.length} appliance(s) from PDF`, items: fallbackItems });
-        } else {
-          setParseResults({
-            success: false,
-            message: 'No appliance data found in PDF. Try a quote with model numbers in parentheses and prices.',
-          });
-        }
+        setParseResults({
+          success: false,
+          message: 'No appliance data found in PDF. Try a quote or invoice with model numbers and prices.',
+        });
       }
     } catch {
       setParseResults({ success: false, message: 'Error reading PDF file. Please try a different file.' });
@@ -88,36 +94,47 @@ export default function DocumentUpload({ onParsedItems }) {
 
   /**
    * Parse quote-style PDFs: find model numbers in parentheses and their "Your Price".
-   * Looks for pattern: description with (MODEL-NUMBER) followed by dollar amounts,
-   * takes the first dollar amount as "Your Price".
+   * Also extracts a brief description from the text before the parenthesized model.
    */
   function parseQuoteText(text) {
     const items = [];
 
-    // Find all model numbers in parentheses with nearby prices
-    // Pattern: text containing (MODEL) ... $price
     const modelPattern = /\(([A-Z0-9][A-Z0-9\-\/]+[A-Z0-9])\)/g;
     let match;
     const modelPositions = [];
 
     while ((match = modelPattern.exec(text)) !== null) {
-      modelPositions.push({ model: match[1], index: match.index + match[0].length });
+      // Capture description: text between previous model (or start) and this match
+      const descStart = modelPositions.length > 0
+        ? modelPositions[modelPositions.length - 1].index
+        : Math.max(0, match.index - 150);
+      const rawDesc = text.substring(descStart, match.index).trim();
+
+      // Clean up description: take last meaningful segment (after last delimiter/line break)
+      let description = '';
+      const descLines = rawDesc.split(/[\n\r]+/);
+      const lastLine = descLines[descLines.length - 1].trim();
+      // Remove leading numbers, bullets, quantities
+      const cleaned = lastLine.replace(/^[\d.)\-•*\s]+/, '').replace(/\s{2,}/g, ' ').trim();
+      // Only keep if it looks like a product description (has letters, reasonable length)
+      if (cleaned.length > 3 && cleaned.length < 120 && /[a-zA-Z]/.test(cleaned)) {
+        description = cleaned;
+      }
+
+      modelPositions.push({ model: match[1], index: match.index + match[0].length, description });
     }
 
     for (let i = 0; i < modelPositions.length; i++) {
-      const { model, index } = modelPositions[i];
-      // Look for dollar amounts after the model number, up to the next model or 200 chars
+      const { model, index, description } = modelPositions[i];
       const endIndex = i + 1 < modelPositions.length
         ? modelPositions[i + 1].index
         : index + 200;
       const searchText = text.substring(index, Math.min(endIndex, text.length));
 
-      // Find the first dollar amount (Your Price)
       const priceMatch = searchText.match(/\$\s*([\d,]+\.\d{2})/);
       if (priceMatch) {
         const cost = parseFloat(priceMatch[1].replace(/,/g, ''));
         if (!isNaN(cost) && cost > 0) {
-          // Skip if this looks like a tax, rebate, or subtotal amount
           const contextBefore = text.substring(Math.max(0, index - 50), index).toLowerCase();
           if (/(?:tax|rebate|discount|subtotal|total|shipping|delivery)/i.test(contextBefore)) continue;
 
@@ -126,6 +143,8 @@ export default function DocumentUpload({ onParsedItems }) {
             model,
             cost,
             isSmall: false,
+            description,
+            _source: 'Quote',
           });
         }
       }
@@ -135,7 +154,109 @@ export default function DocumentUpload({ onParsedItems }) {
   }
 
   /**
-   * Fallback generic text parser for PDFs without parenthesized model numbers.
+   * Parse invoice-style PDFs.
+   * Detect item table by "MODEL" header, parse lines starting with uppercase model token,
+   * capture first token as model and last dollar amount as price.
+   * Description is the text between model and price.
+   */
+  function parseInvoiceText(text) {
+    const items = [];
+
+    // Find the header line containing MODEL
+    const headerMatch = text.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
+    if (!headerMatch) return items;
+
+    // Get everything after the header
+    const afterHeader = text.substring(headerMatch.index + headerMatch[0].length);
+
+    // Split into rough lines by looking for patterns
+    // PDF text extraction joins everything with spaces, so we look for model-number patterns
+    // A model number starts with uppercase letters/digits at a "line start" position
+    const linePattern = /(?:^|\s{2,})([A-Z][A-Z0-9]{2,}[A-Z0-9\-\/]*[A-Z0-9])\s+(.+?)(\$?\s*[\d,]+\.\d{2})/g;
+    let lineMatch;
+
+    while ((lineMatch = linePattern.exec(afterHeader)) !== null) {
+      const fullMatch = lineMatch[0].toLowerCase();
+      // Stop at subtotal/total/tax lines
+      if (/subtotal|sub\s*total|^total|sales\s*tax|hst|gst|amount\s*due/i.test(fullMatch)) break;
+
+      const modelCandidate = lineMatch[1].trim();
+      const middleText = lineMatch[2].trim();
+      const priceStr = lineMatch[3].trim();
+
+      // Skip non-appliance lines (delivery, protection plans, accessories, hose kits)
+      if (/(?:delivery|install|hose|kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service)/i.test(middleText)) continue;
+      if (/(?:delivery|install|hose|kit|bracket|connector|cpp|protection\s*plan|protected\s*item)/i.test(modelCandidate)) continue;
+
+      // Model must be at least 4 chars and contain a digit
+      if (modelCandidate.length < 4 || !/\d/.test(modelCandidate)) continue;
+
+      const cost = parseFloat(priceStr.replace(/[$,\s]/g, ''));
+      if (isNaN(cost) || cost <= 0) continue;
+
+      // Extract description: brand and product type from middle text
+      let description = middleText
+        .replace(/\$[\d,]+\.\d{2}/g, '') // remove any extra prices
+        .replace(/\s*\d+\s*$/, '') // remove trailing quantity
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
+      // Cap description length
+      if (description.length > 100) {
+        description = description.substring(0, 100).trim();
+      }
+
+      items.push({
+        id: crypto.randomUUID(),
+        model: modelCandidate,
+        cost,
+        isSmall: false,
+        description,
+        _source: 'Invoice',
+      });
+    }
+
+    // If regex approach found nothing, try a simpler line-by-line split approach
+    if (items.length === 0) {
+      const segments = afterHeader.split(/(?=(?:^|\s{2,})[A-Z][A-Z0-9]{3,})/);
+      for (const seg of segments) {
+        const trimmed = seg.trim();
+        if (!trimmed) continue;
+
+        // Stop conditions
+        if (/^(?:SUBTOTAL|TOTAL|TAX|HST|GST|AMOUNT)/i.test(trimmed)) break;
+
+        // Try to extract: MODEL_TOKEN description... price
+        const segMatch = trimmed.match(/^([A-Z][A-Z0-9\-\/]{3,}[A-Z0-9])\s+(.+?)\s+\$?\s*([\d,]+\.\d{2})/);
+        if (!segMatch) continue;
+
+        const model = segMatch[1];
+        const desc = segMatch[2].replace(/\$[\d,]+\.\d{2}/g, '').replace(/\s{2,}/g, ' ').trim();
+        const cost = parseFloat(segMatch[3].replace(/,/g, ''));
+
+        if (!/\d/.test(model) || model.length < 4) continue;
+        if (isNaN(cost) || cost <= 0) continue;
+        if (/(?:delivery|install|hose|kit|bracket|connector|cpp|protection|labour|labor)/i.test(desc)) continue;
+
+        let description = desc;
+        if (description.length > 100) description = description.substring(0, 100).trim();
+
+        items.push({
+          id: crypto.randomUUID(),
+          model,
+          cost,
+          isSmall: false,
+          description,
+          _source: 'Invoice',
+        });
+      }
+    }
+
+    return items;
+  }
+
+  /**
+   * Fallback generic text parser for PDFs without clear structure.
    */
   function parseGenericText(text) {
     const lines = text.split('\n').filter((l) => l.trim());
@@ -147,13 +268,14 @@ export default function DocumentUpload({ onParsedItems }) {
         const cost = parseFloat(priceMatch[1].replace(/,/g, ''));
         const model = line.substring(0, line.indexOf(priceMatch[0])).trim().replace(/[-–—,|]+$/, '').trim();
         if (model && model.length > 2 && !isNaN(cost) && cost > 0) {
-          // Skip lines that look like totals/taxes
           if (/(?:^(?:sub)?total|^tax|^shipping|^delivery|^rebate|^discount)/i.test(model)) continue;
           items.push({
             id: crypto.randomUUID(),
             model,
             cost,
             isSmall: false,
+            description: '',
+            _source: 'PDF',
           });
         }
       }
@@ -182,7 +304,7 @@ export default function DocumentUpload({ onParsedItems }) {
             const isSmall = parts.some((p) => /small/i.test(p));
 
             if (model && !isNaN(cost) && cost > 0) {
-              items.push({ id: crypto.randomUUID(), model, cost, isSmall });
+              items.push({ id: crypto.randomUUID(), model, cost, isSmall, description: '' });
             }
           }
         }
@@ -218,7 +340,7 @@ export default function DocumentUpload({ onParsedItems }) {
             const isSmall = /small/i.test(line);
 
             if (model && !isNaN(cost) && cost > 0) {
-              items.push({ id: crypto.randomUUID(), model, cost, isSmall });
+              items.push({ id: crypto.randomUUID(), model, cost, isSmall, description: '' });
             }
           }
         }
@@ -240,7 +362,9 @@ export default function DocumentUpload({ onParsedItems }) {
 
   function handleAddAll() {
     if (parseResults?.items) {
-      onParsedItems(parseResults.items);
+      // Clean up internal _source field before passing to parent
+      const cleaned = parseResults.items.map(({ _source, ...rest }) => rest);
+      onParsedItems(cleaned);
       setParseResults(null);
       setFileName(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -293,7 +417,7 @@ export default function DocumentUpload({ onParsedItems }) {
             <p className="text-slate-300 font-medium">
               {fileName ? fileName : 'Drop a file here or click to browse'}
             </p>
-            <p className="text-slate-500 text-sm mt-1">Supports PDF, CSV, and TXT files (quotes, invoices, lists)</p>
+            <p className="text-slate-500 text-sm mt-1">Supports PDF quotes, invoices, CSV, and TXT files</p>
           </>
         )}
       </div>
@@ -311,9 +435,14 @@ export default function DocumentUpload({ onParsedItems }) {
           {parseResults.items && (
             <div className="mt-3 space-y-1">
               {parseResults.items.map((item) => (
-                <div key={item.id} className="flex items-center justify-between text-sm py-1">
-                  <span className="text-slate-300">{item.model}</span>
-                  <div className="flex items-center gap-2">
+                <div key={item.id} className="flex items-center justify-between text-sm py-1.5">
+                  <div className="min-w-0 flex-1 mr-3">
+                    <span className="text-slate-300 font-medium">{item.model}</span>
+                    {item.description && (
+                      <span className="text-slate-500 text-xs ml-2">{item.description}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <span className="font-mono">${item.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveItem(item.id); }}

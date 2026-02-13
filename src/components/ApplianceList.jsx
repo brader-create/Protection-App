@@ -55,6 +55,7 @@ export default function ApplianceList({
         const isExcluded = excludedIds.has(app.id);
         const isEditing = editingId === app.id;
         const has3 = save3Active && !save3Exclusions.has(app.id);
+        const discountedCost = Math.round(app.cost * 0.97 * 100) / 100;
 
         if (isEditing) {
           return (
@@ -115,6 +116,9 @@ export default function ApplianceList({
               <span className={`font-medium truncate block ${isExcluded ? 'text-slate-500 line-through' : 'text-slate-100'}`}>
                 {app.model}
               </span>
+              {app.description && (
+                <span className="text-slate-500 text-xs truncate block">{app.description}</span>
+              )}
             </div>
 
             {app.isSmall && <span className="badge-amber text-[10px] shrink-0">Small</span>}
@@ -122,18 +126,21 @@ export default function ApplianceList({
             {save3Active && (
               <button
                 onClick={() => onToggle3(app.id)}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all shrink-0 ${
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all shrink-0 flex items-center gap-1 ${
                   has3
                     ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                     : 'bg-slate-800/50 text-slate-600 border-slate-700/30 hover:text-slate-400'
                 }`}
-                title={has3 ? 'Click to exclude from 3% savings' : 'Click to include in 3% savings'}
+                title={has3 ? `3% off: $${discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'Click to include in 3% savings'}
               >
                 3%
+                {has3 && (
+                  <span className="tabular-nums">${discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                )}
               </button>
             )}
 
-            <span className={`font-semibold tabular-nums shrink-0 ${isExcluded ? 'text-slate-500' : 'text-slate-100'}`}>
+            <span className={`font-semibold tabular-nums shrink-0 ${isExcluded ? 'text-slate-500' : has3 ? 'text-slate-500 line-through text-sm' : 'text-slate-100'}`}>
               ${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </span>
 
