@@ -158,7 +158,7 @@ export default function App() {
         {results && (
           <div className="card">
             <div className="card-body">
-              <ResultsPanel results={results} />
+              <ResultsPanel results={results} appliances={appliances} />
             </div>
           </div>
         )}
