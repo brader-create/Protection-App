@@ -285,20 +285,25 @@ export default function DocumentUpload({ onParsedItems }) {
     // Skip patterns for non-appliance lines
     const skipPattern = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
 
-    // Process each page separately (pages joined with \n in parsePDF)
+    // Pages are joined with \n in parsePDF
     const pages = text.split('\n');
 
-    for (const pageText of pages) {
-      // Find the header on this page
-      const headerMatch = pageText.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
-      if (!headerMatch) continue;
+    // First: check if ANY page has a MODEL header (confirms this is an invoice)
+    const hasHeader = pages.some(p => /MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i.test(p));
+    if (!hasHeader) return items;
 
-      const afterHeader = pageText.substring(headerMatch.index + headerMatch[0].length);
+    // Process EVERY page — not just pages with headers (page 2, 3, 4+ won't repeat the header)
+    for (const pageText of pages) {
+      // If this page has a header, start scanning after it
+      const headerMatch = pageText.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
+      const scanText = headerMatch
+        ? pageText.substring(headerMatch.index + headerMatch[0].length)
+        : pageText;
 
       // Stop at summary lines on THIS page only
       const stopPattern = /\b(?:SUBTOTAL|SUB\s*TOTAL|TOTAL|SALES\s*TAX|HST|GST|AMOUNT\s*DUE|PROTECTED\s*ITEMS?)\b/i;
-      const stopMatch = stopPattern.exec(afterHeader);
-      const itemSection = stopMatch ? afterHeader.substring(0, stopMatch.index) : afterHeader;
+      const stopMatch = stopPattern.exec(scanText);
+      const itemSection = stopMatch ? scanText.substring(0, stopMatch.index) : scanText;
 
       // Strategy 1: model token + middle text + price
       const linePattern = /(?:^|\s{2,}|\n)([A-Z]{2,}[A-Z0-9\-\/]*\d[A-Z0-9\-\/]*)\s+(.+?)(\$?\s*[\d,]+\.\d{2})/g;
@@ -328,9 +333,20 @@ export default function DocumentUpload({ onParsedItems }) {
           _source: 'Invoice',
         });
       }
+    }
 
-      // Strategy 2: fallback — find model tokens and nearest price after
-      if (items.length === 0) {
+    // Strategy 2: fallback if Strategy 1 found nothing on any page
+    if (items.length === 0) {
+      for (const pageText of pages) {
+        const headerMatch = pageText.match(/MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i);
+        const scanText = headerMatch
+          ? pageText.substring(headerMatch.index + headerMatch[0].length)
+          : pageText;
+
+        const stopPattern = /\b(?:SUBTOTAL|SUB\s*TOTAL|TOTAL|SALES\s*TAX|HST|GST|AMOUNT\s*DUE|PROTECTED\s*ITEMS?)\b/i;
+        const stopMatch = stopPattern.exec(scanText);
+        const itemSection = stopMatch ? scanText.substring(0, stopMatch.index) : scanText;
+
         const tokenPattern = /\b([A-Z]{2,}[A-Z0-9\-]{2,}\d[A-Z0-9\-]*)\b/g;
         let tokenMatch;
 
