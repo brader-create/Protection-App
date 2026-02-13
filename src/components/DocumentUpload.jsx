@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export default function DocumentUpload({ onParsedItems }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -283,7 +284,10 @@ export default function DocumentUpload({ onParsedItems }) {
         </svg>
 
         {loading ? (
-          <p className="text-blue-400 font-medium">Reading PDF...</p>
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            <p className="text-blue-400 font-medium">Reading PDF...</p>
+          </div>
         ) : (
           <>
             <p className="text-slate-300 font-medium">
