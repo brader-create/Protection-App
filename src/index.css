@@ -178,4 +178,28 @@
   .light-mode .btn-danger {
     @apply bg-red-100 text-red-600 border-red-200 hover:bg-red-200;
   }
+
+  /* Turbo charge animations */
+  @keyframes turbo-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.15); }
+    50% { box-shadow: 0 0 20px 4px rgba(168, 85, 247, 0.1); }
+  }
+  @keyframes turbo-bolt {
+    0% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.1); }
+    100% { opacity: 0.3; transform: scale(0.8); }
+  }
+  @keyframes turbo-scan {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+  }
+  .turbo-active {
+    animation: turbo-pulse 3s ease-in-out infinite;
+  }
+  .turbo-bolt {
+    animation: turbo-bolt 2s ease-in-out infinite;
+  }
+  .turbo-scan-bar {
+    animation: turbo-scan 1.2s ease-in-out infinite;
+  }
 }
