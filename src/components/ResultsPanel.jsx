@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { WARRANTY_YEARS, lookupPrice, GROUP_TYPES, getBracket, PRICING } from '../data/warrantyPricing';
 import { generateComparisonPDF } from '../utils/pdfExport';
 import { analyzeBracketProximity, calculateAll, calculateIndividual } from '../utils/calculator';
@@ -38,8 +38,9 @@ function ThresholdMeter({ item, years }) {
 }
 
 /**
- * Turbo Charge: tries up to 6% discount on individual models to reach better brackets.
- * Uses minimum discount needed per model. Red alert if discount > 4% (risky margin).
+ * Optimized Turbo Charge: tries minimal discounts on models to reach better brackets.
+ * For large bundles (10+), uses smart targeting instead of brute-force pairs.
+ * Returns full bestMix result with turbo applied + per-model discount info.
  */
 function computeTurboCharge(appliances, years, currentBestResult) {
   if (!currentBestResult?.valid || appliances.length < 2) return null;
@@ -47,82 +48,105 @@ function computeTurboCharge(appliances, years, currentBestResult) {
   const currentBest = currentBestResult.total;
   let bestTurbo = null;
 
-  // Try discount levels from 1% to 6% in 0.5% steps
   const discountSteps = [0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05, 0.055, 0.06];
+  const isLarge = appliances.length > 10;
 
   for (const discount of discountSteps) {
-    // Try applying discount to each subset of appliances
-    // For efficiency, try each individual appliance first, then pairs
+    // Strategy 1: single model discounts (always try all)
     for (let i = 0; i < appliances.length; i++) {
-      const modified = appliances.map((a, idx) => {
-        if (idx === i) {
-          return { ...a, cost: Math.round(a.cost * (1 - discount) * 100) / 100 };
-        }
-        return a;
-      });
+      const modified = appliances.map((a, idx) =>
+        idx === i ? { ...a, cost: Math.round(a.cost * (1 - discount) * 100) / 100 } : a
+      );
 
       const result = calculateAll(modified, years);
       if (!result?.cheapestPrice || result.cheapestPrice >= currentBest) continue;
 
       const saving = currentBest - result.cheapestPrice;
-      const discountAmount = appliances[i].cost - modified[i].cost;
-
-      // Only worthwhile if warranty saving exceeds what we gave up in discount
       if (saving <= 0) continue;
 
+      const discountMap = { [i]: discount };
       if (!bestTurbo || saving > bestTurbo.saving) {
-        bestTurbo = {
-          saving,
-          discountPct: discount,
-          discountAmount,
-          modelIndex: i,
-          model: appliances[i].model,
-          originalCost: appliances[i].cost,
-          newCost: modified[i].cost,
-          newTotal: result.cheapestPrice,
-          isRisky: discount > 0.04,
-        };
+        bestTurbo = buildTurboResult(appliances, modified, discount, discountMap, result, saving);
       }
     }
 
-    // Try pairs of appliances with same discount
+    // Strategy 2: pairs — for large bundles, only try top-cost models
     if (appliances.length >= 3) {
-      for (let i = 0; i < appliances.length; i++) {
-        for (let j = i + 1; j < appliances.length; j++) {
-          const modified = appliances.map((a, idx) => {
-            if (idx === i || idx === j) {
-              return { ...a, cost: Math.round(a.cost * (1 - discount) * 100) / 100 };
-            }
-            return a;
-          });
+      const indices = isLarge
+        ? appliances.map((a, i) => ({ i, cost: a.cost }))
+            .sort((a, b) => b.cost - a.cost)
+            .slice(0, 6)
+            .map((x) => x.i)
+        : appliances.map((_, i) => i);
+
+      for (let ii = 0; ii < indices.length; ii++) {
+        for (let jj = ii + 1; jj < indices.length; jj++) {
+          const i = indices[ii];
+          const j = indices[jj];
+          const modified = appliances.map((a, idx) =>
+            idx === i || idx === j ? { ...a, cost: Math.round(a.cost * (1 - discount) * 100) / 100 } : a
+          );
 
           const result = calculateAll(modified, years);
           if (!result?.cheapestPrice || result.cheapestPrice >= currentBest) continue;
 
           const saving = currentBest - result.cheapestPrice;
           if (!bestTurbo || saving > bestTurbo.saving) {
-            const totalDiscount = (appliances[i].cost - modified[i].cost) + (appliances[j].cost - modified[j].cost);
-            bestTurbo = {
-              saving,
-              discountPct: discount,
-              discountAmount: totalDiscount,
-              models: [
-                { model: appliances[i].model, originalCost: appliances[i].cost, newCost: modified[i].cost },
-                { model: appliances[j].model, originalCost: appliances[j].cost, newCost: modified[j].cost },
-              ],
-              newTotal: result.cheapestPrice,
-              isRisky: discount > 0.04,
-            };
+            const discountMap = { [i]: discount, [j]: discount };
+            bestTurbo = buildTurboResult(appliances, modified, discount, discountMap, result, saving);
           }
         }
       }
     }
 
-    // If we found something at a lower discount, don't keep going higher
+    // Early exit if we found a saving at a low discount
     if (bestTurbo && discount <= 0.03) break;
   }
 
   return bestTurbo;
+}
+
+function buildTurboResult(original, modified, maxDiscount, discountMap, calcResult, saving) {
+  // Build per-model detail
+  const modelDetails = [];
+  let totalDiscountAmount = 0;
+  for (const [idx, pct] of Object.entries(discountMap)) {
+    const i = parseInt(idx);
+    const orig = original[i];
+    const mod = modified[i];
+    const diff = orig.cost - mod.cost;
+    totalDiscountAmount += diff;
+    modelDetails.push({
+      model: orig.model,
+      originalCost: orig.cost,
+      newCost: mod.cost,
+      discountPct: pct,
+      discountAmount: diff,
+    });
+  }
+
+  // Find which strategy won — prefer bestMix
+  const bestResult = calcResult.bestMix?.valid ? calcResult.bestMix : null;
+
+  return {
+    saving,
+    maxDiscountPct: maxDiscount,
+    totalDiscountAmount,
+    modelDetails,
+    newTotal: calcResult.cheapestPrice,
+    isRisky: maxDiscount > 0.04,
+    // Include the full bestMix result so we can render its items
+    turboItems: bestResult?.items || [],
+    originalTotal: original.reduce((s, a) => s + a.cost, 0),
+    modifiedTotal: modified.reduce((s, a) => s + a.cost, 0),
+    // Map of model name → discount info for rendering inline
+    discountByModel: Object.fromEntries(
+      Object.entries(discountMap).map(([idx, pct]) => {
+        const i = parseInt(idx);
+        return [original[i].model, { pct, originalCost: original[i].cost, newCost: modified[i].cost }];
+      })
+    ),
+  };
 }
 
 function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds }) {
@@ -233,11 +257,268 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active, years,
   );
 }
 
+/** Best Mix card with integrated Turbo Charge */
+function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, appliances }) {
+  const [turboActive, setTurboActive] = useState(false);
+  const [turboLoading, setTurboLoading] = useState(false);
+  const [turboResult, setTurboResult] = useState(null);
+  const turboIdRef = useRef(0);
+
+  const isBest = result.isCheapest && result.valid;
+  const warrantySaved =
+    save3Active && originalResult?.valid && result.valid
+      ? originalResult.total - result.total
+      : null;
+
+  // Reset turbo when year/results change
+  useEffect(() => {
+    setTurboActive(false);
+    setTurboResult(null);
+    setTurboLoading(false);
+    ++turboIdRef.current;
+  }, [years, result]);
+
+  const handleTurboToggle = useCallback(() => {
+    if (turboActive) {
+      setTurboActive(false);
+      setTurboResult(null);
+      ++turboIdRef.current;
+      return;
+    }
+
+    setTurboActive(true);
+    setTurboLoading(true);
+    const id = ++turboIdRef.current;
+
+    // Run async so UI stays responsive
+    setTimeout(() => {
+      const res = computeTurboCharge(appliances, years, result);
+      if (turboIdRef.current !== id) return;
+      setTurboResult(res);
+      setTurboLoading(false);
+    }, 50);
+  }, [turboActive, appliances, years, result]);
+
+  const showingTurbo = turboActive && turboResult && !turboLoading;
+  const displayTotal = showingTurbo ? turboResult.newTotal : result.total;
+  const displayIsBest = showingTurbo ? true : isBest;
+
+  return (
+    <div className={`result-card relative overflow-hidden ${displayIsBest ? 'result-card-best border-emerald-500/40' : ''} ${turboActive ? 'turbo-active' : ''}`}>
+      {/* Turbo active subtle bolt in background */}
+      {turboActive && !turboLoading && (
+        <div className="absolute top-2 left-2 turbo-bolt pointer-events-none">
+          <svg className="w-6 h-6 text-purple-500/15" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+      )}
+
+      {/* Badge area */}
+      <div className="absolute top-3 right-3 flex items-center gap-1.5">
+        {displayIsBest && !turboActive && (
+          <span className="badge-emerald flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            Best Price
+          </span>
+        )}
+        {showingTurbo && (
+          <span className={`badge-purple flex items-center gap-1.5 ${turboResult.isRisky ? '!bg-red-500/20 !text-red-400 !border-red-500/30' : ''}`}>
+            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            {turboResult.isRisky ? 'Risky Margin' : 'Turbo Active'}
+          </span>
+        )}
+      </div>
+
+      <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>{result.label}</h3>
+
+      {result.valid ? (
+        <>
+          {/* Price display — cross off original when turbo is showing */}
+          <div className="mb-4">
+            {showingTurbo ? (
+              <div className="flex items-baseline gap-3">
+                <span className="price-tag text-purple-400">{formatPrice(turboResult.newTotal)}</span>
+                <span className="text-lg line-through tabular-nums" style={{ color: 'var(--text-faint)' }}>{formatPrice(result.total)}</span>
+              </div>
+            ) : (
+              <div className={`price-tag ${isBest ? 'text-emerald-400' : ''}`} style={!isBest ? { color: 'var(--text-primary)' } : {}}>
+                {formatPrice(result.total)}
+              </div>
+            )}
+          </div>
+
+          {/* Turbo savings summary */}
+          {showingTurbo && (
+            <div className={`rounded-lg p-3 mb-4 border ${turboResult.isRisky ? 'bg-red-500/5 border-red-500/20' : 'bg-purple-500/5 border-purple-500/20'}`}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className={`text-xs font-bold ${turboResult.isRisky ? 'text-red-400' : 'text-purple-300'}`}>
+                  Turbo Savings: {formatPrice(turboResult.saving)}
+                </span>
+                <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                  Appliance discount: {formatPrice(turboResult.totalDiscountAmount)}
+                </span>
+              </div>
+              <div className="space-y-1">
+                {turboResult.modelDetails.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between text-[11px]">
+                    <span style={{ color: 'var(--text-muted)' }}>{m.model}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${turboResult.isRisky ? 'bg-red-500/15 text-red-400' : 'bg-purple-500/15 text-purple-300'}`}>
+                        -{(m.discountPct * 100).toFixed(1)}%
+                      </span>
+                      <span className="line-through tabular-nums" style={{ color: 'var(--text-faint)' }}>
+                        ${m.originalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="tabular-nums font-semibold text-purple-300">
+                        ${m.newCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {warrantySaved !== null && warrantySaved > 0 && !showingTurbo && (
+            <p className="text-sm text-amber-400 mb-4 flex items-center gap-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              Save {formatPrice(warrantySaved)} on warranty with 3%
+            </p>
+          )}
+
+          {/* Group breakdown — show turbo items if active, original items otherwise */}
+          <div className="space-y-3">
+            {(showingTurbo ? turboResult.turboItems : result.items).map((item, i) => (
+              <div key={i} className="rounded-lg p-3" style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-light)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="badge-blue text-[10px]">{item.groupLabel}</span>
+                  <div className="flex items-center gap-2 ml-auto">
+                    {/* Show original group price crossed off if turbo changed it */}
+                    {showingTurbo && result.items[i] && result.items[i].price !== item.price && (
+                      <span className="text-xs line-through tabular-nums" style={{ color: 'var(--text-faint)' }}>
+                        {formatPrice(result.items[i].price)}
+                      </span>
+                    )}
+                    <span className={`text-sm font-semibold tabular-nums ${showingTurbo ? 'text-purple-300' : ''}`} style={!showingTurbo ? { color: 'var(--text-primary)' } : {}}>
+                      {formatPrice(item.price)}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  {item.appliances.map((app, j) => {
+                    const turboDiscount = showingTurbo ? turboResult.discountByModel[app.model] : null;
+                    return (
+                      <div key={j} className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
+                        <div className="truncate mr-2 flex items-center gap-1.5">
+                          <span>{app.model}</span>
+                          {app.description && (
+                            <span style={{ color: 'var(--text-faint)' }}>{app.description}</span>
+                          )}
+                          {turboDiscount && (
+                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${turboResult.isRisky ? 'bg-red-500/15 text-red-400' : 'bg-purple-500/15 text-purple-300'}`}>
+                              -{(turboDiscount.pct * 100).toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {turboDiscount && (
+                            <span className="line-through tabular-nums" style={{ color: 'var(--text-faint)' }}>
+                              ${turboDiscount.originalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </span>
+                          )}
+                          <span className={`tabular-nums ${turboDiscount ? 'font-semibold text-purple-300' : ''}`}>
+                            ${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {item.bracket && (
+                  <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-faint)' }}>
+                    Bracket: ${item.bracket.min.toLocaleString()} – ${item.bracket.max.toLocaleString()}
+                    {item.appliances.length > 1 && (
+                      <span className="ml-1">(combined: ${item.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })})</span>
+                    )}
+                  </p>
+                )}
+                {showThresholds && !showingTurbo && <ThresholdMeter item={item} years={years} />}
+              </div>
+            ))}
+          </div>
+
+          {/* Turbo Charge button — inside the card */}
+          <div className="mt-4 pt-3 border-t" style={{ borderColor: 'var(--border-light)' }}>
+            <button
+              onClick={handleTurboToggle}
+              disabled={turboLoading}
+              className={`w-full text-sm font-semibold px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${
+                turboActive
+                  ? turboResult?.isRisky
+                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/25'
+                    : 'bg-purple-600 text-white shadow-lg shadow-purple-600/25'
+                  : 'bg-purple-500/15 text-purple-300 border border-purple-500/30 hover:bg-purple-500/25'
+              }`}
+            >
+              {turboLoading ? (
+                <>
+                  <div className="relative w-5 h-5">
+                    <div className="absolute inset-0 border-2 border-purple-300/30 border-t-purple-300 rounded-full animate-spin" />
+                    <svg className="absolute inset-0.5 w-4 h-4 text-purple-300 turbo-bolt" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  Analyzing brackets...
+                </>
+              ) : (
+                <>
+                  <svg className={`w-4 h-4 ${turboActive ? 'turbo-bolt' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  {turboActive
+                    ? turboResult
+                      ? 'Disable Turbo'
+                      : 'No bracket savings found'
+                    : 'Turbo Charge'}
+                </>
+              )}
+            </button>
+
+            {/* Turbo loading scan bar */}
+            {turboLoading && (
+              <div className="mt-2 w-full h-1 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-inner)' }}>
+                <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-purple-500 to-transparent rounded-full turbo-scan-bar" />
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm mb-2">Not available for this combination</p>
+          {result.items
+            .filter((item) => item.error)
+            .map((item, i) => (
+              <p key={i} className="text-xs text-red-400/70">
+                {item.error}
+              </p>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances }) {
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThresholds, setShowThresholds] = useState(false);
-  const [showTurbo, setShowTurbo] = useState(false);
 
   // Progressive threshold reveal
   useEffect(() => {
@@ -278,7 +559,6 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
           a.cost,
           activeYear
         );
-        // If small, also check single and pick cheaper
         let bestIndiv = indivPrice;
         if (a.isSmall) {
           const singlePrice = lookupPrice(GROUP_TYPES.SINGLE, a.cost, activeYear);
@@ -289,12 +569,6 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
         return { ...a, individualWarranty: bestIndiv };
       });
   }, [excludedIds, allAppliances, activeYear]);
-
-  // Turbo charge computation (lazy — only when clicked)
-  const turboResult = useMemo(() => {
-    if (!showTurbo) return null;
-    return computeTurboCharge(appliances, activeYear, bestMix);
-  }, [showTurbo, appliances, activeYear, bestMix]);
 
   function handleDownloadPDF() {
     setGenerating(true);
@@ -311,7 +585,6 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
   function handleCopyEmail() {
     const lines = [];
 
-    // Build year pricing data
     const yearData = [];
     for (const yr of WARRANTY_YEARS) {
       const yearResult = byYear[yr];
@@ -325,18 +598,11 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
 
     if (yearData.length === 0) return;
 
-    // Find the best value year
-    const allBests = yearData.map((d) => d.best).filter(Boolean);
-    // Best value = most coverage for money (highest year with competitive price)
-    // Use the longest term as "best value" since it's cheapest per-year
-    const bestValueYr = yearData[yearData.length - 1];
-
     lines.push('And one more quick thing I want to add because it\'s come up a lot lately. Manufacturer coverage is usually around 1 year, and that\'s essentially the minimum allowed in Canada. The main change in the last decade is that appliances are more "computerized" than ever. More sensors, boards, and moving pieces. So repair frequency can be higher, and the cost of parts/labour has definitely climbed.');
     lines.push('');
     lines.push('Below are the extended protection plan bundles through our partner here at Trail (from best value down). The crossed-out price is the regular individual total, and the bold price is the best bundled price I can do:');
     lines.push('');
 
-    // Show from longest (best value) to shortest
     const sortedYearData = [...yearData].reverse();
     for (let i = 0; i < sortedYearData.length; i++) {
       const { yr, totalYears, individualTotal, best } = sortedYearData[i];
@@ -539,74 +805,15 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
         </div>
       )}
 
-      {/* Turbo Charge Button + Result */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => setShowTurbo(!showTurbo)}
-          className={`text-sm font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
-            showTurbo
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25'
-              : 'bg-purple-500/15 text-purple-300 border border-purple-500/30 hover:bg-purple-500/25'
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          Turbo Charge
-        </button>
-        {showTurbo && !turboResult && (
-          <span className="text-xs" style={{ color: 'var(--text-faint)' }}>No additional bracket savings found at up to 6%</span>
-        )}
-      </div>
-
-      {showTurbo && turboResult && (
-        <div className={`rounded-xl p-4 border ${turboResult.isRisky ? 'border-red-500/40 bg-red-500/5' : 'border-purple-500/30 bg-purple-500/10'}`}>
-          <div className="flex items-start gap-3">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${turboResult.isRisky ? 'bg-red-500/20' : 'bg-purple-500/20'}`}>
-              <svg className={`w-4 h-4 ${turboResult.isRisky ? 'text-red-400' : 'text-purple-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <p className={`text-sm font-bold ${turboResult.isRisky ? 'text-red-400' : 'text-purple-300'}`}>
-                  Save {formatPrice(turboResult.saving)} with {(turboResult.discountPct * 100).toFixed(1)}% discount
-                </p>
-                {turboResult.isRisky && (
-                  <span className="text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded-full font-bold">
-                    RISKY MARGIN
-                  </span>
-                )}
-              </div>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                New warranty total: <span className="font-semibold text-emerald-400">{formatPrice(turboResult.newTotal)}</span>
-              </p>
-              {turboResult.models ? (
-                <div className="mt-1 space-y-0.5">
-                  {turboResult.models.map((m, i) => (
-                    <p key={i} className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                      {m.model}: ${m.originalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} → ${m.newCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </p>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-faint)' }}>
-                  {turboResult.model}: ${turboResult.originalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} → ${turboResult.newCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <ResultCard
+        <BestMixCard
           result={bestMix}
           cheapestPrice={cheapestPrice}
           originalResult={originalResults?.bestMix}
           save3Active={save3Active}
           years={activeYear}
           showThresholds={showThresholds}
+          appliances={appliances}
         />
         <ResultCard
           result={singleBundle}
