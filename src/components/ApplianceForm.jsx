@@ -28,7 +28,7 @@ export default function ApplianceForm({ onAdd }) {
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-3 items-end">
         <div>
-          <label className="block text-sm text-slate-400 mb-1.5 font-medium">Model / Description</label>
+          <label className="block text-sm mb-1.5 font-medium" style={{ color: 'var(--text-muted)' }}>Model / Description</label>
           <input
             ref={modelInputRef}
             type="text"
@@ -40,7 +40,7 @@ export default function ApplianceForm({ onAdd }) {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-400 mb-1.5 font-medium">Cost ($)</label>
+          <label className="block text-sm mb-1.5 font-medium" style={{ color: 'var(--text-muted)' }}>Cost ($)</label>
           <input
             type="text"
             className="input-field"
@@ -51,14 +51,14 @@ export default function ApplianceForm({ onAdd }) {
         </div>
 
         <div className="flex items-end pb-1">
-          <label className="flex items-center gap-2 cursor-pointer select-none bg-slate-800/50 border border-slate-700/30 rounded-xl px-4 py-3 hover:bg-slate-800/80 transition-all">
+          <label className="flex items-center gap-2 cursor-pointer select-none rounded-xl px-4 py-3 transition-all" style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-light)' }}>
             <input
               type="checkbox"
               checked={isSmall}
               onChange={(e) => setIsSmall(e.target.checked)}
               className="w-4 h-4 rounded border-slate-600 text-blue-500 focus:ring-blue-500/50 bg-slate-700 cursor-pointer"
             />
-            <span className="text-sm text-slate-300 whitespace-nowrap">Small Appliance</span>
+            <span className="text-sm whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>Small Appliance</span>
           </label>
         </div>
 

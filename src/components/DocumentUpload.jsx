@@ -521,7 +521,11 @@ export default function DocumentUpload({ onParsedItems }) {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => {
+          // Reset input value so re-selecting the same file triggers onChange
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          fileInputRef.current?.click();
+        }}
       >
         <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.txt,.pdf" onChange={handleFileSelect} />
 

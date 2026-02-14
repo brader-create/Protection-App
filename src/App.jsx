@@ -14,6 +14,9 @@ export default function App() {
   const [excludedIds, setExcludedIds] = useState(new Set());
   const [save3Active, setSave3Active] = useState(false);
   const [save3Exclusions, setSave3Exclusions] = useState(new Set());
+  const [lightMode, setLightMode] = useState(() => {
+    try { return localStorage.getItem('wlc-theme') === 'light'; } catch { return false; }
+  });
 
   // Progressive results: built year-by-year
   const [normalByYear, setNormalByYear] = useState({});
@@ -25,6 +28,12 @@ export default function App() {
 
   const calcIdRef = useRef(0);
   const pregenIdRef = useRef(0);
+
+  // Theme toggle
+  useEffect(() => {
+    document.documentElement.classList.toggle('light-mode', lightMode);
+    try { localStorage.setItem('wlc-theme', lightMode ? 'light' : 'dark'); } catch {}
+  }, [lightMode]);
 
   // Separate memos so pregenerate doesn't cause re-renders when save3 is off
   const normalResults = useMemo(() => {
@@ -100,6 +109,7 @@ export default function App() {
   useEffect(() => { save3ExclusionsRef.current = save3Exclusions; }, [save3Exclusions]);
 
   // Progressive calculation: one year at a time (4→3→2)
+  // Each year result is available immediately — user can switch tabs while remaining years load
   const runProgressiveCalc = useCallback((opts = {}) => {
     const { forSave3 = false } = opts;
     const apps = appliancesRef.current;
@@ -144,10 +154,6 @@ export default function App() {
       if (idx >= years.length) {
         setCalculating(false);
         setHasResults(true);
-        // After normal calc done, pre-generate 3% in background (separate ref)
-        if (!forSave3) {
-          pregenerate3(active);
-        }
         return;
       }
 
@@ -167,46 +173,6 @@ export default function App() {
     }
 
     setTimeout(computeNext, 15);
-  }, []);
-
-  // Separate pregenerate function using its own ref — doesn't interfere with main calc
-  const pregenerate3 = useCallback((active) => {
-    const pgId = ++pregenIdRef.current;
-    setPrecomputing(true);
-
-    const prepared = active.map((a) => ({
-      ...a,
-      originalCost: a.cost,
-      cost: Math.round(a.cost * 0.97 * 100) / 100,
-    }));
-
-    const origTotal = active.reduce((s, a) => s + a.cost, 0);
-    const discTotal = prepared.reduce((s, a) => s + a.cost, 0);
-
-    const years = [4, 3, 2];
-    let idx = 0;
-
-    function computeNext() {
-      if (pregenIdRef.current !== pgId) return; // cancelled
-      if (idx >= years.length) {
-        setPrecomputing(false);
-        setProductSavings(origTotal - discTotal);
-        return;
-      }
-
-      const yr = years[idx];
-      const result = calculateAll(prepared, yr);
-      setSave3ByYear((prev) => ({ ...prev, [yr]: result }));
-
-      const origResult = calculateAll(active, yr);
-      setSave3OrigByYear((prev) => ({ ...prev, [yr]: origResult }));
-
-      idx++;
-      setTimeout(computeNext, 50); // slower pace for background work
-    }
-
-    // Longer delay before starting background work
-    setTimeout(computeNext, 300);
   }, []);
 
   function handleCalculate() {
@@ -236,14 +202,10 @@ export default function App() {
 
     if (hasResults || Object.keys(normalByYear).length > 0) {
       if (nowActive) {
-        // Check if we have pre-computed 3% cache ready (all 3 years)
         if (Object.keys(save3ByYear).length === 3) {
-          // Cache is ready — just switch display (useMemo handles it)
           return;
         }
-        // Need to compute — will be triggered by effect below
       }
-      // Turning off — normalByYear is already there, switches instantly
     }
   }
 
@@ -254,9 +216,7 @@ export default function App() {
       if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
-    // Need to recompute save3 results with new exclusions
     if (hasResults && save3Active) {
-      // Small delay to let state update
       setTimeout(() => {
         runProgressiveCalc({ forSave3: true });
       }, 20);
@@ -273,9 +233,9 @@ export default function App() {
   const activeCount = appliances.filter((a) => !excludedIds.has(a.id)).length;
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-base)' }}>
       {/* Header */}
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b backdrop-blur-sm sticky top-0 z-50" style={{ borderColor: 'var(--border-main)', backgroundColor: 'var(--bg-base)' }}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
@@ -289,10 +249,28 @@ export default function App() {
               </svg>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-100">Warranty Protection Calculator</h1>
-              <p className="text-xs text-slate-500">Warranty List Options 6.0</p>
+              <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Warranty Protection Calculator</h1>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Warranty List Options 6.0</p>
             </div>
           </div>
+
+          {/* Day/Night mode toggle */}
+          <button
+            onClick={() => setLightMode(!lightMode)}
+            className="p-2.5 rounded-xl transition-all duration-200 hover:scale-105"
+            style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)' }}
+            title={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+          >
+            {lightMode ? (
+              <svg className="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5 text-blue-300" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+              </svg>
+            )}
+          </button>
         </div>
       </header>
 
@@ -301,7 +279,7 @@ export default function App() {
         <div className="card">
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-slate-100">Appliances</h2>
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Appliances</h2>
               {appliances.length > 0 && (
                 <span className="bg-blue-500/20 text-blue-300 text-xs font-bold px-2.5 py-0.5 rounded-full">
                   {excludedIds.size > 0 ? `${activeCount}/${appliances.length}` : appliances.length}
@@ -364,14 +342,14 @@ export default function App() {
         {/* Save 3% + Calculate */}
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2.5 cursor-pointer select-none bg-slate-900/80 border border-slate-700/50 rounded-xl px-5 py-2.5 hover:bg-slate-800/80 transition-all">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none rounded-xl px-5 py-2.5 hover:opacity-80 transition-all" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-main)' }}>
               <input
                 type="checkbox"
                 checked={save3Active}
                 onChange={toggleSave3}
                 className="w-4 h-4 rounded border-slate-600 text-amber-500 focus:ring-amber-500/50 bg-slate-700 cursor-pointer accent-amber-500"
               />
-              <span className={`text-sm font-medium ${save3Active ? 'text-amber-300' : 'text-slate-400'}`}>
+              <span className={`text-sm font-medium ${save3Active ? 'text-amber-400' : ''}`} style={!save3Active ? { color: 'var(--text-muted)' } : {}}>
                 Save 3%
               </span>
               {save3Active && (
@@ -417,14 +395,16 @@ export default function App() {
                 appliances={appliances.filter((a) => !excludedIds.has(a.id))}
                 save3Active={save3Active}
                 calculating={calculating}
+                excludedIds={excludedIds}
+                allAppliances={appliances}
               />
             </div>
           </div>
         )}
       </main>
 
-      <footer className="border-t border-slate-800/50 mt-12 py-6">
-        <p className="text-center text-slate-600 text-sm">Warranty List Options 6.0 — Protection Plan Calculator</p>
+      <footer className="border-t mt-12 py-6" style={{ borderColor: 'var(--border-main)' }}>
+        <p className="text-center text-sm" style={{ color: 'var(--text-faint)' }}>Warranty List Options 6.0 — Protection Plan Calculator</p>
       </footer>
     </div>
   );

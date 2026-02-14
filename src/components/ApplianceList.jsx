@@ -36,7 +36,7 @@ export default function ApplianceList({
 
   if (appliances.length === 0) {
     return (
-      <div className="text-center py-12 text-slate-500">
+      <div className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
         <svg className="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
         </svg>
@@ -60,13 +60,13 @@ export default function ApplianceList({
         if (isEditing) {
           return (
             <div key={app.id} className="appliance-row">
-              <span className="text-slate-500 text-sm font-mono w-6 text-right shrink-0">{index + 1}</span>
+              <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
               <input
                 type="text"
                 value={editModel}
                 onChange={(e) => setEditModel(e.target.value)}
                 onKeyDown={handleEditKeyDown}
-                className="flex-1 min-w-0 bg-slate-700/80 border border-slate-600/50 rounded-lg px-3 py-1.5 text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                className="input-field !py-1.5 !px-3 flex-1 min-w-0 text-sm"
                 autoFocus
               />
               <input
@@ -74,7 +74,7 @@ export default function ApplianceList({
                 value={editCost}
                 onChange={(e) => setEditCost(e.target.value)}
                 onKeyDown={handleEditKeyDown}
-                className="w-28 bg-slate-700/80 border border-slate-600/50 rounded-lg px-3 py-1.5 text-slate-100 text-sm text-right focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                className="input-field !py-1.5 !px-3 w-28 text-sm text-right"
                 placeholder="Cost"
               />
               <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
@@ -84,7 +84,7 @@ export default function ApplianceList({
                   onChange={(e) => setEditSmall(e.target.checked)}
                   className="w-3.5 h-3.5 rounded border-slate-600 text-amber-500 bg-slate-700 cursor-pointer accent-amber-500"
                 />
-                <span className="text-[10px] text-slate-400">Small</span>
+                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Small</span>
               </label>
               <button onClick={saveEdit} className="p-1.5 hover:bg-emerald-600/20 rounded-lg text-emerald-400 transition-colors" title="Save">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -110,14 +110,14 @@ export default function ApplianceList({
               title={isExcluded ? 'Include in calculation' : 'Exclude from calculation'}
             />
 
-            <span className="text-slate-500 text-sm font-mono w-6 text-right shrink-0">{index + 1}</span>
+            <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
 
             <div className="flex-1 min-w-0">
-              <span className={`font-medium truncate block ${isExcluded ? 'text-slate-500 line-through' : 'text-slate-100'}`}>
+              <span className={`font-medium truncate block ${isExcluded ? 'line-through' : ''}`} style={{ color: isExcluded ? 'var(--text-muted)' : 'var(--text-primary)' }}>
                 {app.model}
               </span>
               {app.description && (
-                <span className="text-slate-500 text-xs truncate block">{app.description}</span>
+                <span className="text-xs truncate block" style={{ color: 'var(--text-muted)' }}>{app.description}</span>
               )}
             </div>
 
@@ -140,13 +140,14 @@ export default function ApplianceList({
               </button>
             )}
 
-            <span className={`font-semibold tabular-nums shrink-0 ${isExcluded ? 'text-slate-500' : has3 ? 'text-slate-500 line-through text-sm' : 'text-slate-100'}`}>
+            <span className={`font-semibold tabular-nums shrink-0 ${has3 ? 'line-through text-sm' : ''}`} style={{ color: isExcluded ? 'var(--text-muted)' : has3 ? 'var(--text-muted)' : 'var(--text-primary)' }}>
               ${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </span>
 
             <button
               onClick={() => startEdit(app)}
-              className="p-1.5 hover:bg-blue-600/20 rounded-lg text-slate-500 hover:text-blue-400 transition-colors"
+              className="p-1.5 hover:bg-blue-600/20 rounded-lg transition-colors"
+              style={{ color: 'var(--text-muted)' }}
               title="Edit appliance"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -156,7 +157,8 @@ export default function ApplianceList({
 
             <button
               onClick={() => onRemove(app.id)}
-              className="p-1.5 hover:bg-red-600/20 rounded-lg text-slate-500 hover:text-red-400 transition-colors"
+              className="p-1.5 hover:bg-red-600/20 rounded-lg hover:text-red-400 transition-colors"
+              style={{ color: 'var(--text-muted)' }}
               title="Remove appliance"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,13 +169,13 @@ export default function ApplianceList({
         );
       })}
 
-      <div className="flex items-center justify-between pt-3 border-t border-slate-700/50 mt-3 px-4">
-        <span className="text-slate-400 text-sm">
+      <div className="flex items-center justify-between pt-3 mt-3 px-4" style={{ borderTop: '1px solid var(--border-main)' }}>
+        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
           {excludedIds.size > 0
             ? `${enabledAppliances.length} of ${appliances.length} appliance${appliances.length !== 1 ? 's' : ''} selected`
             : `${appliances.length} appliance${appliances.length !== 1 ? 's' : ''}`}
         </span>
-        <span className="text-slate-200 font-bold text-lg tabular-nums">
+        <span className="font-bold text-lg tabular-nums" style={{ color: 'var(--text-primary)' }}>
           Total: ${totalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
         </span>
       </div>
