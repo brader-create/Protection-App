@@ -22,6 +22,10 @@ const APPLIANCE_TYPES = [
   ['dehumid', 'Dehumidifier'], ['humidif', 'Humidifier'],
   ['water heater', 'Water Heater'],
   ['dispos', 'Disposal'],
+  ['insert', 'Insert'], ['fireplace', 'Fireplace'],
+  ['grill', 'Grill'], ['bbq', 'BBQ'],
+  ['warming drawer', 'Warming Drawer'], ['drawer', 'Warming Drawer'],
+  ['column', 'Column'],
 ];
 
 const BRANDS = [
@@ -197,8 +201,10 @@ export default function DocumentUpload({ onParsedItems }) {
   }
 
   /**
-   * Parse quote-style PDFs: find model numbers in parentheses and their "Your Price".
-   * Descriptions are comma-separated like "KitchenAid, Range, Induction" — pull brand + type from commas.
+   * Parse quote-style PDFs: find model numbers in parentheses.
+   * Price extraction: find Qty "1" then take the next price (Your Price).
+   * Skip rebate lines (prices in parentheses), MSRP/Install columns.
+   * Descriptions: comma-separated like "KitchenAid, Range, Induction" → Brand - Type.
    */
   function parseQuoteText(text) {
     const items = [];
@@ -208,64 +214,142 @@ export default function DocumentUpload({ onParsedItems }) {
     const modelPositions = [];
 
     while ((match = modelPattern.exec(text)) !== null) {
-      // Grab text before this model's parentheses (up to 200 chars back)
+      const model = match[1];
+      // Skip if it looks like a rebate code or known non-model
+      if (/^(ORDER|DATE|ITEM|QTY|TAX|HST|GST)/i.test(model)) continue;
+      if (!isValidModel(model)) continue;
+
+      // Grab text before this model's parentheses for description (up to 200 chars back)
       const descStart = modelPositions.length > 0
-        ? modelPositions[modelPositions.length - 1].index
+        ? modelPositions[modelPositions.length - 1].endIndex
         : Math.max(0, match.index - 200);
       const rawDesc = text.substring(descStart, match.index).trim();
 
-      // Look for comma-separated description like "KitchenAid, Range, Induction" or "KitchenAid, D/W, SS"
-      // Find the last comma-separated chunk in the raw text before the model
-      const commaMatch = rawDesc.match(/([A-Za-z][A-Za-z&\s\-]+(?:,\s*[A-Za-z][A-Za-z0-9&\s\/\-]*)+)\s*$/);
+      // Extract description from comma-separated parts
       let description = '';
+      const commaMatch = rawDesc.match(/([A-Za-z][A-Za-z&\s\-]+(?:,\s*[A-Za-z][A-Za-z0-9&\s\/\-]*)+)\s*$/);
       if (commaMatch) {
         const parts = commaMatch[1].split(',').map(p => p.trim()).filter(Boolean);
-        // First part = brand, second part = type
-        const brand = parts[0] || '';
-        const typeRaw = parts[1] || '';
-        // Clean up type through APPLIANCE_TYPES lookup
+        let brand = '';
         let type = '';
-        const typeLower = typeRaw.toLowerCase();
-        for (const [keyword, label] of APPLIANCE_TYPES) {
-          if (typeLower.includes(keyword)) {
-            type = label;
+
+        // First part is usually brand — check known brands
+        const firstLower = (parts[0] || '').toLowerCase();
+        for (const b of BRANDS) {
+          if (firstLower === b.toLowerCase() || firstLower.startsWith(b.toLowerCase())) {
+            brand = b;
             break;
           }
         }
-        // If no match in lookup, use the raw type as-is (e.g. "D/W" -> "D/W")
-        if (!type && typeRaw) type = typeRaw;
+        if (!brand && parts[0]) brand = parts[0];
+
+        // Check ALL remaining parts for appliance type (not just second)
+        for (let pi = 1; pi < parts.length && !type; pi++) {
+          const partLower = parts[pi].toLowerCase();
+          for (const [keyword, label] of APPLIANCE_TYPES) {
+            if (partLower.includes(keyword)) {
+              type = label;
+              break;
+            }
+          }
+          // Also check without spaces (e.g. "HoodFan")
+          if (!type) {
+            const noSpace = partLower.replace(/[\s\/]+/g, '');
+            for (const [keyword, label] of APPLIANCE_TYPES) {
+              if (noSpace.includes(keyword.replace(/\s/g, ''))) {
+                type = label;
+                break;
+              }
+            }
+          }
+        }
+
+        // If no type found from comma parts, try the raw parts as-is
+        if (!type && parts[1]) type = parts[1];
+
         if (brand && type) description = `${brand} - ${type}`;
         else if (brand) description = brand;
       } else {
         description = cleanDescription(rawDesc);
       }
 
-      modelPositions.push({ model: match[1], index: match.index + match[0].length, description });
+      modelPositions.push({
+        model,
+        matchIndex: match.index,
+        endIndex: match.index + match[0].length,
+        description,
+      });
     }
 
+    // For each model, find its price using Qty "1" → next price pattern
     for (let i = 0; i < modelPositions.length; i++) {
-      const { model, index, description } = modelPositions[i];
-      const endIndex = i + 1 < modelPositions.length
-        ? modelPositions[i + 1].index
-        : index + 200;
-      const searchText = text.substring(index, Math.min(endIndex, text.length));
+      const { model, endIndex, description } = modelPositions[i];
+      // Search from model end to next model start (or +500 chars)
+      const searchEnd = i + 1 < modelPositions.length
+        ? modelPositions[i + 1].matchIndex
+        : endIndex + 500;
+      const searchText = text.substring(endIndex, Math.min(searchEnd, text.length));
 
-      const priceMatch = searchText.match(/\$\s*([\d,]+\.\d{2})/);
-      if (priceMatch) {
-        const cost = parseFloat(priceMatch[1].replace(/,/g, ''));
-        if (!isNaN(cost) && cost > 0) {
-          const contextBefore = text.substring(Math.max(0, index - 50), index).toLowerCase();
-          if (/(?:tax|rebate|discount|subtotal|total|shipping|delivery)/i.test(contextBefore)) continue;
+      // Strategy 1: Find Qty "1" followed by the Your Price
+      // Pattern: standalone "1" (qty) then first non-parenthesized price
+      const qtyMatch = searchText.match(/\b1\b/);
+      let cost = null;
 
-          items.push({
-            id: crypto.randomUUID(),
-            model,
-            cost,
-            isSmall: false,
-            description,
-            _source: 'Quote',
-          });
+      if (qtyMatch) {
+        const afterQty = searchText.substring(qtyMatch.index + 1);
+        // Find first dollar amount that's NOT inside parentheses (rebates are like ($100.00))
+        // Walk through prices, skip any preceded by "("
+        const pricePattern = /(\(?\$?\s*)([\d,]+\.\d{2})(\)?)/g;
+        let priceMatch;
+        while ((priceMatch = pricePattern.exec(afterQty)) !== null) {
+          const prefix = afterQty.substring(Math.max(0, priceMatch.index - 2), priceMatch.index + priceMatch[1].length);
+          // Skip if this price is inside parentheses (rebate)
+          if (prefix.includes('(') || priceMatch[3] === ')') continue;
+          // Skip zero or tiny amounts
+          const val = parseFloat(priceMatch[2].replace(/,/g, ''));
+          if (!isNaN(val) && val >= 50) {
+            cost = val;
+            break;
+          }
         }
+      }
+
+      // Strategy 2: Fallback — find "Your Price" label then price
+      if (cost === null) {
+        const yourPriceMatch = searchText.match(/your\s*price\s*\$?\s*([\d,]+\.\d{2})/i);
+        if (yourPriceMatch) {
+          const val = parseFloat(yourPriceMatch[1].replace(/,/g, ''));
+          if (!isNaN(val) && val >= 50) cost = val;
+        }
+      }
+
+      // Strategy 3: Ultimate fallback — first reasonable price after model
+      if (cost === null) {
+        const prices = [];
+        const simplePrice = /\$\s*([\d,]+\.\d{2})/g;
+        let sp;
+        while ((sp = simplePrice.exec(searchText)) !== null) {
+          // Skip if inside parens
+          const before = searchText.substring(Math.max(0, sp.index - 2), sp.index);
+          if (before.includes('(')) continue;
+          const val = parseFloat(sp[1].replace(/,/g, ''));
+          if (!isNaN(val) && val >= 50) {
+            prices.push(val);
+          }
+        }
+        // If we have prices, take the one that appears after a "1" or the first one
+        if (prices.length > 0) cost = prices[0];
+      }
+
+      if (cost !== null) {
+        items.push({
+          id: crypto.randomUUID(),
+          model,
+          cost,
+          isSmall: false,
+          description,
+          _source: 'Quote',
+        });
       }
     }
 

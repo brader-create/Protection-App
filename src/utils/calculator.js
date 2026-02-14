@@ -61,7 +61,7 @@ export function calculateIndividual(appliances, years) {
     }
   }
 
-  return { items, total: allValid ? total : null, valid: allValid, label: 'Individual' };
+  return { items, total: allValid ? total : null, partialTotal: total, valid: allValid, label: 'Individual' };
 }
 
 /**
@@ -136,7 +136,8 @@ export function calculateBestMix(appliances, years) {
   return {
     items: bestPartition.items,
     total: bestPartition.total,
-    valid: true,
+    partialTotal: bestPartition.partialTotal || bestPartition.total,
+    valid: bestPartition.valid !== false,
     label: 'Best Mix',
   };
 }
@@ -324,60 +325,77 @@ function greedySearch(appliances, years) {
     let bestGroup = null;
     let bestSavings = 0;
 
-    // Try 3+ groups: take consecutive unused items (sorted by cost)
-    for (let size = Math.min(remaining.length, 10); size >= 3; size--) {
-      for (let start = 0; start <= remaining.length - size; start++) {
-        const candidates = remaining.slice(start, start + size);
-        const groupAppliances = candidates.map((idx) => sorted[idx]);
-        const groupCost = groupAppliances.reduce((s, a) => s + a.cost, 0);
-        const price = lookupPrice(GROUP_TYPES.TRIPLE_PLUS, groupCost, years);
-        if (price === null) continue;
+    // Helper to evaluate a group candidate
+    function evaluateGroup(candidates, groupType) {
+      const groupAppliances = candidates.map((idx) => sorted[idx]);
+      const groupCost = groupAppliances.reduce((s, a) => s + a.cost, 0);
+      const price = lookupPrice(groupType, groupCost, years);
+      if (price === null) return;
 
-        let individualSum = 0;
-        let allValid = true;
-        for (const app of groupAppliances) {
-          const p = getIndividualPrice(app);
-          if (p === null) { allValid = false; break; }
-          individualSum += p;
-        }
+      let individualSum = 0;
+      let allValid = true;
+      for (const app of groupAppliances) {
+        const p = getIndividualPrice(app);
+        if (p === null) { allValid = false; break; }
+        individualSum += p;
+      }
 
-        const savings = allValid ? individualSum - price : Infinity;
-        if (savings > bestSavings) {
-          bestSavings = savings;
-          bestGroup = {
-            indices: candidates,
-            appliances: groupAppliances,
-            groupType: GROUP_TYPES.TRIPLE_PLUS,
-            totalCost: groupCost,
-            price,
-          };
-        }
+      const savings = allValid ? individualSum - price : Infinity;
+      if (savings > bestSavings) {
+        bestSavings = savings;
+        bestGroup = {
+          indices: candidates,
+          appliances: groupAppliances,
+          groupType,
+          totalCost: groupCost,
+          price,
+        };
       }
     }
 
-    // Try pairs
+    // Strategy A: Combinations from top items (not just consecutive)
+    // For sizes 3-6, try all combos from top 12 remaining items
+    const topN = Math.min(remaining.length, 12);
+    const topItems = remaining.slice(0, topN);
+
+    for (let size = Math.min(topN, 6); size >= 3; size--) {
+      const combos = [];
+      generateCombinations(topItems, size, 0, [], combos);
+      for (const combo of combos) {
+        evaluateGroup(combo, GROUP_TYPES.TRIPLE_PLUS);
+      }
+    }
+
+    // Strategy B: Consecutive windows for larger groups (7-10) — fast scan
+    for (let size = Math.min(remaining.length, 10); size >= 7; size--) {
+      for (let start = 0; start <= remaining.length - size; start++) {
+        evaluateGroup(remaining.slice(start, start + size), GROUP_TYPES.TRIPLE_PLUS);
+      }
+    }
+
+    // Strategy C: Bracket-targeted groups
+    // For each TRIPLE_PLUS bracket, greedily fill from remaining items
+    const tpBrackets = PRICING[GROUP_TYPES.TRIPLE_PLUS];
+    for (const bracket of tpBrackets) {
+      const [bMin, bMax] = bracket;
+      const picked = [];
+      let sum = 0;
+      for (const idx of remaining) {
+        if (picked.length >= 10) break;
+        if (sum + sorted[idx].cost <= bMax) {
+          picked.push(idx);
+          sum += sorted[idx].cost;
+        }
+      }
+      if (picked.length >= 3 && sum >= bMin && sum <= bMax) {
+        evaluateGroup(picked, GROUP_TYPES.TRIPLE_PLUS);
+      }
+    }
+
+    // Try pairs from all remaining
     for (let i = 0; i < remaining.length; i++) {
       for (let j = i + 1; j < remaining.length; j++) {
-        const pair = [sorted[remaining[i]], sorted[remaining[j]]];
-        const pairCost = pair[0].cost + pair[1].cost;
-        const pairPrice = lookupPrice(GROUP_TYPES.DOUBLE, pairCost, years);
-        if (pairPrice === null) continue;
-
-        const p1 = getIndividualPrice(pair[0]);
-        const p2 = getIndividualPrice(pair[1]);
-        if (p1 === null || p2 === null) continue;
-
-        const savings = (p1 + p2) - pairPrice;
-        if (savings > bestSavings) {
-          bestSavings = savings;
-          bestGroup = {
-            indices: [remaining[i], remaining[j]],
-            appliances: pair,
-            groupType: GROUP_TYPES.DOUBLE,
-            totalCost: pairCost,
-            price: pairPrice,
-          };
-        }
+        evaluateGroup([remaining[i], remaining[j]], GROUP_TYPES.DOUBLE);
       }
     }
 
@@ -422,12 +440,21 @@ function greedySearch(appliances, years) {
         bracket: getBracket(groupType, app.cost),
       });
     } else {
-      return null;
+      // Item exceeds max bracket — include with error but don't break
+      groups.push({
+        appliances: [app],
+        groupType,
+        groupLabel: GROUP_LABELS[groupType],
+        totalCost: app.cost,
+        price: null,
+        error: `No bracket for $${app.cost.toLocaleString()} in ${GROUP_LABELS[groupType]}`,
+      });
     }
     used.add(i);
   }
 
-  return { items: groups, total, valid: true };
+  const allPriced = groups.every(g => g.price !== null);
+  return { items: groups, total: allPriced ? total : null, partialTotal: total, valid: allPriced };
 }
 
 /**

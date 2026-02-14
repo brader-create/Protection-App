@@ -249,7 +249,7 @@ export default function App() {
               </svg>
             </div>
             <div>
-              <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Warranty Protection Calculator</h1>
+              <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Brads Handy Dandy Protection Calculator</h1>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Warranty List Options 6.0</p>
             </div>
           </div>
@@ -404,7 +404,7 @@ export default function App() {
       </main>
 
       <footer className="border-t mt-12 py-6" style={{ borderColor: 'var(--border-main)' }}>
-        <p className="text-center text-sm" style={{ color: 'var(--text-faint)' }}>Warranty List Options 6.0 — Protection Plan Calculator</p>
+        <p className="text-center text-sm" style={{ color: 'var(--text-faint)' }}>Brads Handy Dandy Protection Calculator — Warranty List Options 6.0</p>
       </footer>
     </div>
   );
