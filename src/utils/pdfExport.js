@@ -9,7 +9,8 @@ function formatPrice(price) {
 }
 
 /**
- * Generate a 1-page PDF comparing warranty plans across 2, 3, and 4 year terms.
+ * Generate a PDF comparing warranty plans across 2, 3, and 4 year terms.
+ * Compact layout with side-by-side breakdowns.
  */
 export function generateComparisonPDF(appliances) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -161,32 +162,12 @@ export function generateComparisonPDF(appliances) {
 
   y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 30) + 8;
 
-  // --- Best Price Summary ---
-  doc.setFillColor(236, 253, 245);
-  doc.roundedRect(margin, y, pageWidth - margin * 2, 20, 3, 3, 'F');
-  doc.setDrawColor(16, 185, 129);
-  doc.roundedRect(margin, y, pageWidth - margin * 2, 20, 3, 3, 'S');
-
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(30, 41, 59);
-  doc.text('Best Available Prices:', margin + 5, y + 8);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(5, 150, 105);
-  const priceTexts = WARRANTY_YEARS.map((yr) =>
-    `${yr}-Year: ${bestPerYear[yr] !== null ? formatPrice(bestPerYear[yr]) : '—'}`
-  );
-  doc.text(priceTexts.join('     '), margin + 5, y + 15);
-
-  y += 28;
-
-  // --- Breakdown for each year (if space allows) ---
+  // --- Compact Side-by-Side Breakdown ---
+  // Build breakdown data for all 3 years
+  const breakdownData = [];
   for (const yr of WARRANTY_YEARS) {
-    if (y > 250) break;
-
     const result = allResults[yr];
-    if (!result) continue;
+    if (!result) { breakdownData.push(null); continue; }
 
     let bestKey = null;
     let bestTotal = null;
@@ -198,46 +179,66 @@ export function generateComparisonPDF(appliances) {
       }
     }
 
-    if (!bestKey) continue;
-    const bestResult = result[bestKey];
-
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${yr}-Year Best Option: ${strategyLabels[bestKey]} — ${formatPrice(bestTotal)}`, margin, y);
-    y += 1;
-
-    const breakdownRows = bestResult.items.map((item) => [
-      item.groupLabel,
-      item.appliances.map((a) => a.model).join(', '),
-      formatPrice(item.price),
-    ]);
-
-    tableResult = autoTable(doc, {
-      startY: y,
-      head: [['Group', 'Appliances', 'Price']],
-      body: breakdownRows,
-      margin: { left: margin, right: margin },
-      styles: {
-        fontSize: 7.5,
-        cellPadding: 1.5,
-        textColor: [71, 85, 105],
-      },
-      headStyles: {
-        fillColor: [226, 232, 240],
-        textColor: [51, 65, 85],
-        fontStyle: 'bold',
-        fontSize: 7.5,
-      },
-      columnStyles: {
-        0: { cellWidth: 28 },
-        1: { cellWidth: 'auto' },
-        2: { cellWidth: 25, halign: 'right', fontStyle: 'bold' },
-      },
+    if (!bestKey) { breakdownData.push(null); continue; }
+    breakdownData.push({
+      yr,
+      label: strategyLabels[bestKey],
+      total: bestTotal,
+      items: result[bestKey].items,
     });
-
-    y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 20) + 6;
   }
+
+  // Draw all 3 breakdowns as columns side by side
+  const colWidth = (pageWidth - margin * 2 - 6) / 3; // 3mm gaps between cols
+
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Best Option Breakdown', margin, y);
+  y += 5;
+
+  const startY = y;
+  for (let col = 0; col < 3; col++) {
+    const bd = breakdownData[col];
+    if (!bd) continue;
+
+    const x = margin + col * (colWidth + 3);
+    let cy = startY;
+
+    // Column header
+    doc.setFillColor(226, 232, 240);
+    doc.rect(x, cy, colWidth, 7, 'F');
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(51, 65, 85);
+    doc.text(`${bd.yr}-Year: ${bd.label} — ${formatPrice(bd.total)}`, x + 2, cy + 5);
+    cy += 9;
+
+    // Rows
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    for (const item of bd.items) {
+      // Group label + price
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(51, 65, 85);
+      doc.text(item.groupLabel, x + 1, cy);
+      doc.text(formatPrice(item.price), x + colWidth - 1, cy, { align: 'right' });
+      cy += 3.5;
+
+      // Appliance names
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      for (const app of item.appliances) {
+        const label = app.model.length > 18 ? app.model.substring(0, 18) + '...' : app.model;
+        doc.text(label, x + 2, cy);
+        cy += 3;
+      }
+      cy += 1;
+    }
+  }
+
+  // Find max height used
+  y = startY + 80; // reserve space, will be adjusted by content
 
   // --- Footer ---
   doc.setFontSize(7);
