@@ -146,7 +146,7 @@ export default function App() {
       setProductSavings(origTotal - discTotal);
     }
 
-    const years = [4, 3, 2];
+    const years = [4, 3, 2, 1];
     let idx = 0;
 
     function computeNext() {
@@ -202,7 +202,7 @@ export default function App() {
 
     if (hasResults || Object.keys(normalByYear).length > 0) {
       if (nowActive) {
-        if (Object.keys(save3ByYear).length === 3) {
+        if (Object.keys(save3ByYear).length === WARRANTY_YEARS.length) {
           return;
         }
       }
@@ -225,7 +225,7 @@ export default function App() {
 
   // Auto-recalculate when save3 is turned on and no cache exists
   useEffect(() => {
-    if (save3Active && hasResults && Object.keys(save3ByYear).length < 3 && !calculating) {
+    if (save3Active && hasResults && Object.keys(save3ByYear).length < WARRANTY_YEARS.length && !calculating) {
       runProgressiveCalc({ forSave3: true });
     }
   }, [save3Active, hasResults, calculating, runProgressiveCalc]);
