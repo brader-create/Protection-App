@@ -805,7 +805,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
       const { yr, totalYears, individualTotal, best } = sortedYearData[i];
       const isBestValue = i === 0;
 
-      let line = `${totalYears} years total (add ${yr} year${yr !== 1 ? 's' : ''}): `;
+      let line = `${totalYears} years total (add ${yr} years): `;
       if (individualTotal !== null && individualTotal > best) {
         const saved = individualTotal - best;
         line += `$${individualTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} → $${best.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;

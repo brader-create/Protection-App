@@ -146,7 +146,7 @@ export default function App() {
       setProductSavings(origTotal - discTotal);
     }
 
-    const years = [4, 3, 2, 1];
+    const years = [4, 3, 2];
     let idx = 0;
 
     function computeNext() {
@@ -202,7 +202,7 @@ export default function App() {
 
     if (hasResults || Object.keys(normalByYear).length > 0) {
       if (nowActive) {
-        if (Object.keys(save3ByYear).length === WARRANTY_YEARS.length) {
+        if (Object.keys(save3ByYear).length === 3) {
           return;
         }
       }
@@ -225,7 +225,7 @@ export default function App() {
 
   // Auto-recalculate when save3 is turned on and no cache exists
   useEffect(() => {
-    if (save3Active && hasResults && Object.keys(save3ByYear).length < WARRANTY_YEARS.length && !calculating) {
+    if (save3Active && hasResults && Object.keys(save3ByYear).length < 3 && !calculating) {
       runProgressiveCalc({ forSave3: true });
     }
   }, [save3Active, hasResults, calculating, runProgressiveCalc]);
@@ -250,7 +250,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Brads Handy Dandy Protection Calculator</h1>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Warranty List Options 6.0</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Warranty List Options 6.01</p>
             </div>
           </div>
 
@@ -404,7 +404,7 @@ export default function App() {
       </main>
 
       <footer className="border-t mt-12 py-6" style={{ borderColor: 'var(--border-main)' }}>
-        <p className="text-center text-sm" style={{ color: 'var(--text-faint)' }}>Brads Handy Dandy Protection Calculator — Warranty List Options 6.0</p>
+        <p className="text-center text-sm" style={{ color: 'var(--text-faint)' }}>Brads Handy Dandy Protection Calculator — Warranty List Options 6.01</p>
       </footer>
     </div>
   );
