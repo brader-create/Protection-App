@@ -782,47 +782,28 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
   function handleCopyEmail() {
     const lines = [];
 
-    const yearData = [];
-    for (const yr of WARRANTY_YEARS) {
+    const sortedYears = [...WARRANTY_YEARS].reverse();
+    for (const yr of sortedYears) {
       const yearResult = byYear[yr];
       if (!yearResult) continue;
       const best = yearResult.cheapestPrice;
       if (best === null) continue;
       const individualTotal = yearResult.individual?.valid ? yearResult.individual.total : null;
       const totalYears = yr + 1;
-      yearData.push({ yr, totalYears, individualTotal, best });
-    }
 
-    if (yearData.length === 0) return;
-
-    lines.push('And one more quick thing I want to add because it\'s come up a lot lately. Manufacturer coverage is usually around 1 year, and that\'s essentially the minimum allowed in Canada. The main change in the last decade is that appliances are more "computerized" than ever. More sensors, boards, and moving pieces. So repair frequency can be higher, and the cost of parts/labour has definitely climbed.');
-    lines.push('');
-    lines.push('Below are the extended protection plan bundles through our partner here at Trail (from best value down). The crossed-out price is the regular individual total, and the bold price is the best bundled price I can do:');
-    lines.push('');
-
-    const sortedYearData = [...yearData].reverse();
-    for (let i = 0; i < sortedYearData.length; i++) {
-      const { yr, totalYears, individualTotal, best } = sortedYearData[i];
-      const isBestValue = i === 0;
-
-      let line = `${totalYears} years total (add ${yr} years): `;
-      if (individualTotal !== null && individualTotal > best) {
-        const saved = individualTotal - best;
-        line += `$${individualTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} → $${best.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-        if (isBestValue) {
-          line += ` (save $${saved.toLocaleString('en-US', { minimumFractionDigits: 2 })} — best value)`;
+      let line = `${totalYears} years (add ${yr}): `;
+      if (individualTotal !== null) {
+        line += `Individual $${individualTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        if (best < individualTotal) {
+          line += ` | Best Bundle $${best.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
         }
       } else {
-        line += `$${best.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-        if (isBestValue) line += ' (best value)';
+        line += `Best Bundle $${best.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
       }
-
       lines.push(line);
     }
 
-    lines.push('');
-    lines.push('No pressure either way. I just want you to see it while we\'re already talking. If you have any questions at all about coverage, claims, or what\'s most worth protecting, just reply and I\'ll let you know.');
-
+    if (lines.length === 0) return;
     const text = lines.join('\n');
 
     navigator.clipboard.writeText(text).then(() => {
