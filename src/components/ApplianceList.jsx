@@ -14,18 +14,20 @@ export default function ApplianceList({
   const [editModel, setEditModel] = useState('');
   const [editCost, setEditCost] = useState('');
   const [editSmall, setEditSmall] = useState(false);
+  const [editDescription, setEditDescription] = useState('');
 
   function startEdit(app) {
     setEditingId(app.id);
     setEditModel(app.model);
     setEditCost(app.cost.toString());
     setEditSmall(app.isSmall);
+    setEditDescription(app.description || '');
   }
 
   function saveEdit() {
     const numCost = parseFloat(editCost.replace(/[,$]/g, ''));
     if (!editModel.trim() || isNaN(numCost) || numCost <= 0) return;
-    onUpdate(editingId, { model: editModel.trim(), cost: numCost, isSmall: editSmall });
+    onUpdate(editingId, { model: editModel.trim(), cost: numCost, isSmall: editSmall, description: editDescription.trim() });
     setEditingId(null);
   }
 
@@ -59,7 +61,7 @@ export default function ApplianceList({
 
         if (isEditing) {
           return (
-            <div key={app.id} className="appliance-row">
+            <div key={app.id} className="appliance-row flex-wrap">
               <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
               <input
                 type="text"
@@ -67,7 +69,16 @@ export default function ApplianceList({
                 onChange={(e) => setEditModel(e.target.value)}
                 onKeyDown={handleEditKeyDown}
                 className="input-field !py-1.5 !px-3 flex-1 min-w-0 text-sm"
+                placeholder="Model"
                 autoFocus
+              />
+              <input
+                type="text"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                onKeyDown={handleEditKeyDown}
+                className="input-field !py-1.5 !px-3 flex-1 min-w-0 text-sm"
+                placeholder="Description (optional)"
               />
               <input
                 type="text"
