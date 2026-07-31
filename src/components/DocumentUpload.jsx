@@ -13,7 +13,7 @@ const APPLIANCE_TYPES = [
   ['dishwasher', 'Dishwasher'], ['d/w', 'Dishwasher'],
   ['range', 'Range'], ['stove', 'Range'], ['oven', 'Oven'], ['cooktop', 'Cooktop'],
   ['induction', 'Range'],
-  ['microwave', 'Microwave'],
+  ['microwave', 'Microwave'], ['m/w', 'Microwave'],
   ['hoodfan', 'Hood Fan'], ['hood', 'Hood'], ['ventilat', 'Ventilation'],
   ['compactor', 'Compactor'],
   ['ice maker', 'Ice Maker'],
@@ -38,6 +38,28 @@ const BRANDS = [
   'Zephyr', 'Broan', 'Faber', 'Fulgor Milano', 'Smeg', 'La Cornue',
   'Fisher Paykel', 'GE Profile', 'GE Cafe', 'Liebherr',
 ];
+
+// Longest keyword first, so "dishwasher" wins over "washer" and
+// "warming drawer" wins over "drawer".
+const APPLIANCE_TYPES_BY_LENGTH = [...APPLIANCE_TYPES].sort((a, b) => b[0].length - a[0].length);
+
+// Find the appliance type in a chunk of description text.
+function matchApplianceType(text) {
+  if (!text) return '';
+  const lower = text.toLowerCase();
+
+  for (const [keyword, label] of APPLIANCE_TYPES_BY_LENGTH) {
+    if (lower.includes(keyword)) return label;
+  }
+
+  // Retry ignoring spaces/commas/slashes, e.g. "HOOD FAN" → "hoodfan"
+  const collapsed = lower.replace(/[\s,/]+/g, '');
+  for (const [keyword, label] of APPLIANCE_TYPES_BY_LENGTH) {
+    if (collapsed.includes(keyword.replace(/[\s/]+/g, ''))) return label;
+  }
+
+  return '';
+}
 
 function cleanDescription(rawDesc) {
   if (!rawDesc) return '';
@@ -71,24 +93,7 @@ function cleanDescription(rawDesc) {
     }
   }
 
-  let type = '';
-  for (const [keyword, label] of APPLIANCE_TYPES) {
-    if (lower.includes(keyword)) {
-      type = label;
-      break;
-    }
-  }
-
-  // For invoice descriptions with "HOODFAN" style keywords, also check without spaces
-  if (!type) {
-    const noSpaceLower = lower.replace(/[\s,\/]+/g, '');
-    for (const [keyword, label] of APPLIANCE_TYPES) {
-      if (noSpaceLower.includes(keyword.replace(/\s/g, ''))) {
-        type = label;
-        break;
-      }
-    }
-  }
+  const type = matchApplianceType(rawDesc);
 
   if (brand && type) return `${brand} - ${type}`;
   if (brand) return brand;
@@ -110,6 +115,207 @@ function isValidModel(str) {
   // Reject if it looks like a date (e.g., JAN152025)
   if (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d/i.test(str)) return false;
   return true;
+}
+
+// Anything cheaper than this is an accessory (hose kit, trim, cord), not an
+// appliance we'd write a protection plan on.
+const MIN_ITEM_PRICE = 50;
+
+// What a single column header means, e.g. "MSRP*" → 'msrp', "Your Price" → 'price'.
+function columnRole(label) {
+  const l = label.toLowerCase().replace(/[*#:.]/g, '').trim();
+  if (!l) return null;
+  if (/^m\s?s\s?r\s?p$/.test(l)) return 'msrp';
+  if (/^(?:list|retail|reg(?:ular)?)(?:\s*price)?$/.test(l)) return 'msrp';
+  if (/^install(?:ation)?$/.test(l)) return 'install';
+  if (/^(?:qty|quantity|qnty)$/.test(l)) return 'qty';
+  if (/^(?:your|unit|net|sale|sell|our)\s*price$/.test(l)) return 'price';
+  if (/^price$/.test(l)) return 'price';
+  if (/^(?:(?:ext(?:ended)?|line)\s*)?total$/.test(l)) return 'total';
+  if (/^(?:amount|ext(?:ended)?)$/.test(l)) return 'total';
+  return null;
+}
+
+/**
+ * Read the item table's header. Which columns a quote shows varies — MSRP and
+ * Install are optional, and a salesperson can add MSRP to a quote that didn't
+ * show it before — so rows are mapped onto this instead of assuming a fixed
+ * position for the customer's price.
+ *
+ * @returns {string[]} column roles in order, e.g. ['msrp','install','qty','price','total']
+ */
+function parseQuoteColumns(text) {
+  const headerMatch = text.match(/\b(?:item\s*)?(?:details|description)\b/i);
+  if (!headerMatch) return [];
+
+  // Column headers sit between the "Details" label and the first item row.
+  const region = text.slice(headerMatch.index + headerMatch[0].length, headerMatch.index + 220);
+  const chunks = region.split(/\s{2,}|\t|\|/).map((c) => c.trim()).filter(Boolean);
+
+  const columns = [];
+  for (const chunk of chunks) {
+    const role = columnRole(chunk);
+    if (!role) break; // first non-header chunk = the first item's description
+    columns.push(role);
+  }
+
+  // Without a price or total column there's nothing to line rows up against.
+  return columns.includes('price') || columns.includes('total') ? columns : [];
+}
+
+// Cells of one row: money (in parentheses when it's a credit/rebate), an "N/A"
+// placeholder, or the bare integer in the Qty column. Matching whole amounts
+// keeps us from reading the "1" of "$1,449.98" as a quantity.
+const CELL_PATTERN =
+  /\(\s*\$?\s*[\d,]+\.\d{2}\s*\)|\$\s*[\d,]+\.\d{2}|\b\d[\d,]*\.\d{2}\b|N\s*\/\s*A|\bINCL(?:UDED)?\b|\b\d{1,3}\b/gi;
+
+const LEADING_CELLS_PATTERN =
+  /^(?:\s*(?:\(\s*\$?\s*[\d,]+\.\d{2}\s*\)|\$\s*[\d,]+\.\d{2}|\d[\d,]*\.\d{2}|N\s*\/\s*A|INCL(?:UDED)?|\d{1,3}))+/i;
+
+function parseRowCells(rowText) {
+  const cells = [];
+  CELL_PATTERN.lastIndex = 0;
+  let match;
+
+  while ((match = CELL_PATTERN.exec(rowText)) !== null) {
+    const raw = match[0];
+    if (raw.startsWith('(')) continue; // rebate/credit, not a column value
+    if (/^[a-z]/i.test(raw)) {
+      cells.push({ kind: 'blank' }); // N/A or Included
+    } else if (raw.includes('.')) {
+      const value = parseFloat(raw.replace(/[$,\s]/g, ''));
+      if (isNaN(value)) continue;
+      cells.push({ kind: 'money', value });
+    } else {
+      cells.push({ kind: 'count', value: parseInt(raw, 10) });
+    }
+  }
+
+  return cells;
+}
+
+// Do the row's cells line up with the header when shifted by `offset`?
+function layoutFits(cells, columns, offset) {
+  for (let i = 0; i < columns.length; i++) {
+    const cell = cells[i + offset];
+    if (!cell) return false;
+    if (columns[i] === 'qty') {
+      if (cell.kind !== 'count') return false;
+    } else if (columns[i] === 'install') {
+      if (cell.kind !== 'money' && cell.kind !== 'blank') return false;
+    } else if (cell.kind !== 'money') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function priceFromColumns(cells, columns) {
+  const priceIndex = columns.indexOf('price');
+  if (priceIndex === -1) return null;
+
+  // Stray numbers in the description ('30"') can push the row right, so try
+  // each alignment and use the first that matches the header's shape.
+  const maxOffset = Math.max(0, cells.length - columns.length);
+  for (let offset = 0; offset <= maxOffset; offset++) {
+    if (!layoutFits(cells, columns, offset)) continue;
+    const cell = cells[priceIndex + offset];
+    if (cell && cell.kind === 'money') return cell.value;
+  }
+  return null;
+}
+
+// No usable header: the customer's price is the first amount after Qty, which
+// leaves MSRP and Install (which come before it) out of play.
+function priceAfterQty(cells) {
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i].kind !== 'count') continue;
+    for (let j = i + 1; j < cells.length; j++) {
+      if (cells[j].kind === 'money') return cells[j].value;
+      if (cells[j].kind === 'count') break;
+    }
+  }
+  return null;
+}
+
+function firstPriceCell(cells, columns) {
+  const skip = new Set([columns.indexOf('msrp'), columns.indexOf('install')]);
+  for (let i = 0; i < cells.length; i++) {
+    if (skip.has(i)) continue;
+    if (cells[i].kind === 'money' && cells[i].value >= MIN_ITEM_PRICE) return cells[i].value;
+  }
+  return null;
+}
+
+/**
+ * Price for one quote row, in confidence order. The first two strategies are
+ * trusted outright: if they find the customer's price and it's below the
+ * accessory threshold, the row is dropped rather than re-read from a column
+ * we know isn't the customer's price.
+ */
+function pickQuotePrice(rowText, columns) {
+  const cells = parseRowCells(rowText);
+
+  const mapped = priceFromColumns(cells, columns);
+  if (mapped !== null) return mapped >= MIN_ITEM_PRICE ? mapped : null;
+
+  const afterQty = priceAfterQty(cells);
+  if (afterQty !== null) return afterQty >= MIN_ITEM_PRICE ? afterQty : null;
+
+  const labelled = rowText.match(/your\s*price\s*\$?\s*([\d,]+\.\d{2})/i);
+  if (labelled) {
+    const value = parseFloat(labelled[1].replace(/,/g, ''));
+    if (!isNaN(value) && value >= MIN_ITEM_PRICE) return value;
+  }
+
+  return firstPriceCell(cells, columns);
+}
+
+/**
+ * Description for one quote row: the text between the previous model number
+ * and this one, e.g. "LG, DISHWASHER, SS" → "LG - Dishwasher".
+ */
+function describeQuoteRow(rawDesc) {
+  // Drop the previous row's price cells, which sit ahead of this description.
+  const text = rawDesc.replace(LEADING_CELLS_PATTERN, '').trim();
+  if (!text) return '';
+
+  const parts = text.split(',').map((p) => p.trim()).filter(Boolean);
+  // On the table's first row the header ("... Qty  Your Price  Total  LG")
+  // still leads the description; the brand is the last column-separated chunk.
+  const brandPart = (parts[0] || '').split(/\s{2,}/).pop().trim();
+  const brandLower = brandPart.toLowerCase();
+
+  let brand = '';
+  for (const b of BRANDS) {
+    const bl = b.toLowerCase();
+    if (brandLower === bl || brandLower.startsWith(`${bl} `)) {
+      brand = b;
+      break;
+    }
+  }
+  if (!brand) {
+    const lower = text.toLowerCase();
+    for (const b of BRANDS) {
+      if (lower.includes(b.toLowerCase())) {
+        brand = b;
+        break;
+      }
+    }
+  }
+  if (!brand && /^[A-Za-z][A-Za-z&.'-]{1,15}(?:\s[A-Za-z&.'-]{1,15})?$/.test(brandPart)) {
+    brand = brandPart;
+  }
+
+  // Look for the type past the brand, falling back to the whole description.
+  let type = matchApplianceType(parts.slice(1).join(', ')) || matchApplianceType(text);
+  if (!type && parts[1] && /^[A-Za-z][A-Za-z\s/-]{1,18}$/.test(parts[1])) {
+    type = parts[1];
+  }
+
+  if (brand && type) return `${brand} - ${type}`;
+  if (brand) return brand;
+  return type;
 }
 
 export default function DocumentUpload({ onParsedItems }) {
@@ -202,12 +408,15 @@ export default function DocumentUpload({ onParsedItems }) {
 
   /**
    * Parse quote-style PDFs: find model numbers in parentheses.
-   * Price extraction: find Qty "1" then take the next price (Your Price).
-   * Skip rebate lines (prices in parentheses), MSRP/Install columns.
+   * Price extraction: read the item table's header, then take the cell in the
+   * customer's price column ("Your Price") for each row — so an MSRP column,
+   * present or not, is never mistaken for the price. Rebates (amounts in
+   * parentheses) are ignored.
    * Descriptions: comma-separated like "KitchenAid, Range, Induction" → Brand - Type.
    */
   function parseQuoteText(text) {
     const items = [];
+    const columns = parseQuoteColumns(text);
 
     const modelPattern = /\(([A-Z0-9][A-Z0-9\-\/]+[A-Z0-9])\)/g;
     let match;
@@ -224,54 +433,7 @@ export default function DocumentUpload({ onParsedItems }) {
         ? modelPositions[modelPositions.length - 1].endIndex
         : Math.max(0, match.index - 200);
       const rawDesc = text.substring(descStart, match.index).trim();
-
-      // Extract description from comma-separated parts
-      let description = '';
-      const commaMatch = rawDesc.match(/([A-Za-z][A-Za-z&\s\-]+(?:,\s*[A-Za-z][A-Za-z0-9&\s\/\-]*)+)\s*$/);
-      if (commaMatch) {
-        const parts = commaMatch[1].split(',').map(p => p.trim()).filter(Boolean);
-        let brand = '';
-        let type = '';
-
-        // First part is usually brand — check known brands
-        const firstLower = (parts[0] || '').toLowerCase();
-        for (const b of BRANDS) {
-          if (firstLower === b.toLowerCase() || firstLower.startsWith(b.toLowerCase())) {
-            brand = b;
-            break;
-          }
-        }
-        if (!brand && parts[0]) brand = parts[0];
-
-        // Check ALL remaining parts for appliance type (not just second)
-        for (let pi = 1; pi < parts.length && !type; pi++) {
-          const partLower = parts[pi].toLowerCase();
-          for (const [keyword, label] of APPLIANCE_TYPES) {
-            if (partLower.includes(keyword)) {
-              type = label;
-              break;
-            }
-          }
-          // Also check without spaces (e.g. "HoodFan")
-          if (!type) {
-            const noSpace = partLower.replace(/[\s\/]+/g, '');
-            for (const [keyword, label] of APPLIANCE_TYPES) {
-              if (noSpace.includes(keyword.replace(/\s/g, ''))) {
-                type = label;
-                break;
-              }
-            }
-          }
-        }
-
-        // If no type found from comma parts, try the raw parts as-is
-        if (!type && parts[1]) type = parts[1];
-
-        if (brand && type) description = `${brand} - ${type}`;
-        else if (brand) description = brand;
-      } else {
-        description = cleanDescription(rawDesc);
-      }
+      const description = describeQuoteRow(rawDesc) || cleanDescription(rawDesc);
 
       modelPositions.push({
         model,
@@ -281,7 +443,7 @@ export default function DocumentUpload({ onParsedItems }) {
       });
     }
 
-    // For each model, find its price using Qty "1" → next price pattern
+    // For each model, read its row of the item table and take the customer's price
     for (let i = 0; i < modelPositions.length; i++) {
       const { model, endIndex, description } = modelPositions[i];
       // Search from model end to next model start (or +500 chars)
@@ -290,56 +452,7 @@ export default function DocumentUpload({ onParsedItems }) {
         : endIndex + 500;
       const searchText = text.substring(endIndex, Math.min(searchEnd, text.length));
 
-      // Strategy 1: Find Qty "1" followed by the Your Price
-      // Pattern: standalone "1" (qty) then first non-parenthesized price
-      const qtyMatch = searchText.match(/\b1\b/);
-      let cost = null;
-
-      if (qtyMatch) {
-        const afterQty = searchText.substring(qtyMatch.index + 1);
-        // Find first dollar amount that's NOT inside parentheses (rebates are like ($100.00))
-        // Walk through prices, skip any preceded by "("
-        const pricePattern = /(\(?\$?\s*)([\d,]+\.\d{2})(\)?)/g;
-        let priceMatch;
-        while ((priceMatch = pricePattern.exec(afterQty)) !== null) {
-          const prefix = afterQty.substring(Math.max(0, priceMatch.index - 2), priceMatch.index + priceMatch[1].length);
-          // Skip if this price is inside parentheses (rebate)
-          if (prefix.includes('(') || priceMatch[3] === ')') continue;
-          // Skip zero or tiny amounts
-          const val = parseFloat(priceMatch[2].replace(/,/g, ''));
-          if (!isNaN(val) && val >= 50) {
-            cost = val;
-            break;
-          }
-        }
-      }
-
-      // Strategy 2: Fallback — find "Your Price" label then price
-      if (cost === null) {
-        const yourPriceMatch = searchText.match(/your\s*price\s*\$?\s*([\d,]+\.\d{2})/i);
-        if (yourPriceMatch) {
-          const val = parseFloat(yourPriceMatch[1].replace(/,/g, ''));
-          if (!isNaN(val) && val >= 50) cost = val;
-        }
-      }
-
-      // Strategy 3: Ultimate fallback — first reasonable price after model
-      if (cost === null) {
-        const prices = [];
-        const simplePrice = /\$\s*([\d,]+\.\d{2})/g;
-        let sp;
-        while ((sp = simplePrice.exec(searchText)) !== null) {
-          // Skip if inside parens
-          const before = searchText.substring(Math.max(0, sp.index - 2), sp.index);
-          if (before.includes('(')) continue;
-          const val = parseFloat(sp[1].replace(/,/g, ''));
-          if (!isNaN(val) && val >= 50) {
-            prices.push(val);
-          }
-        }
-        // If we have prices, take the one that appears after a "1" or the first one
-        if (prices.length > 0) cost = prices[0];
-      }
+      const cost = pickQuotePrice(searchText, columns);
 
       if (cost !== null) {
         items.push({
