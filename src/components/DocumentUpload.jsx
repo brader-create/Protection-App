@@ -758,7 +758,7 @@ export default function DocumentUpload({ onParsedItems }) {
         {loading ? (
           <div className="flex flex-col items-center gap-2">
             <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-            <p className="text-blue-400 font-medium">Deciphering document...</p>
+            <p className="text-blue-400 font-medium">Reading document...</p>
           </div>
         ) : (
           <>
