@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
@@ -324,6 +324,20 @@ export default function DocumentUpload({ onParsedItems }) {
   const [parseResults, setParseResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
+  const pdfWorkerRef = useRef(null);
+
+  // Start the PDF reading engine as soon as the page opens, and keep it for
+  // every document. Otherwise it's fetched the first time a document is read,
+  // which puts a network request right at the moment you pick a file — reading
+  // a document should touch the network at no point at all.
+  useEffect(() => {
+    const worker = new pdfjsLib.PDFWorker({ name: 'document-reader' });
+    pdfWorkerRef.current = worker;
+    return () => {
+      pdfWorkerRef.current = null;
+      worker.destroy();
+    };
+  }, []);
 
   function handleDragOver(e) {
     e.preventDefault();
@@ -368,7 +382,13 @@ export default function DocumentUpload({ onParsedItems }) {
     setLoading(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      // Reuse the engine started on page load. If it ever went away, pdf.js
+      // falls back to starting its own.
+      const worker = pdfWorkerRef.current;
+      const pdf = await pdfjsLib.getDocument({
+        data: arrayBuffer,
+        ...(worker && !worker.destroyed ? { worker } : {}),
+      }).promise;
 
       let fullText = '';
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -731,21 +751,21 @@ export default function DocumentUpload({ onParsedItems }) {
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeWidth={1.5}
-            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
           />
         </svg>
 
         {loading ? (
           <div className="flex flex-col items-center gap-2">
             <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-            <p className="text-blue-400 font-medium">Reading PDF...</p>
+            <p className="text-blue-400 font-medium">Deciphering document...</p>
           </div>
         ) : (
           <>
             <p className="text-slate-300 font-medium">
-              {fileName ? fileName : 'Drop a file here or click to browse'}
+              {fileName ? fileName : 'Drop a quote or invoice here, or click to browse'}
             </p>
-            <p className="text-slate-500 text-sm mt-1">Supports PDF quotes, invoices, CSV, and TXT files</p>
+            <p className="text-slate-500 text-sm mt-1">PDF, CSV or TXT — read on this computer, never sent anywhere</p>
           </>
         )}
       </div>
