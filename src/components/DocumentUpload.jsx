@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+import { warmPdfEngine } from '../utils/pdfEngine';
 
 const APPLIANCE_TYPES = [
   ['refrigerat', 'Refrigerator'], ['fridge', 'Refrigerator'], ['freezer', 'Freezer'],
@@ -318,26 +316,19 @@ function describeQuoteRow(rawDesc) {
   return type;
 }
 
-export default function DocumentUpload({ onParsedItems }) {
+export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState(null);
   const [parseResults, setParseResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pastedText, setPastedText] = useState('');
   const fileInputRef = useRef(null);
-  const pdfWorkerRef = useRef(null);
 
-  // Start the PDF reading engine as soon as the page opens, and keep it for
-  // every document. Otherwise it's fetched the first time a document is read,
-  // which puts a network request right at the moment you pick a file — reading
-  // a document should touch the network at no point at all.
+  // Normally already running (App starts it on page open); this covers the
+  // case where it was never started or has been torn down.
   useEffect(() => {
-    const worker = new pdfjsLib.PDFWorker({ name: 'document-reader' });
-    pdfWorkerRef.current = worker;
-    return () => {
-      pdfWorkerRef.current = null;
-      worker.destroy();
-    };
-  }, []);
+    if (mode === 'file') warmPdfEngine();
+  }, [mode]);
 
   function handleDragOver(e) {
     e.preventDefault();
@@ -384,7 +375,7 @@ export default function DocumentUpload({ onParsedItems }) {
       const arrayBuffer = await file.arrayBuffer();
       // Reuse the engine started on page load. If it ever went away, pdf.js
       // falls back to starting its own.
-      const worker = pdfWorkerRef.current;
+      const worker = warmPdfEngine();
       const pdf = await pdfjsLib.getDocument({
         data: arrayBuffer,
         ...(worker && !worker.destroyed ? { worker } : {}),
@@ -495,7 +486,7 @@ export default function DocumentUpload({ onParsedItems }) {
    * followed by description and price. Only change: process each page separately
    * so SUBTOTAL on page 1 doesn't cut off page 2 items.
    */
-  function parseInvoiceText(text) {
+  function parseInvoiceText(text, { requireHeader = true } = {}) {
     const items = [];
     const seenModels = new Set();
 
@@ -505,9 +496,10 @@ export default function DocumentUpload({ onParsedItems }) {
     // Pages are joined with \n in parsePDF
     const pages = text.split('\n');
 
-    // First: check if ANY page has a MODEL header (confirms this is an invoice)
+    // First: check if ANY page has a MODEL header (confirms this is an invoice).
+    // Pasted text usually starts below the header, so the paste path waives it.
     const hasHeader = pages.some(p => /MODEL\s*#?\s*DESCRIPTION|MODEL\s*#|MODEL\s+DESC/i.test(p));
-    if (!hasHeader) return items;
+    if (!hasHeader && requireHeader) return items;
 
     // Process EVERY page — not just pages with headers (page 2, 3, 4+ won't repeat the header)
     for (const pageText of pages) {
@@ -628,6 +620,48 @@ export default function DocumentUpload({ onParsedItems }) {
     return items;
   }
 
+  /**
+   * Parse text pasted straight out of a PDF viewer.
+   *
+   * It's the same quote/invoice formatting, but shaped differently from what
+   * pdf.js hands us: a paste is one row per line, each often with a leading
+   * space, and usually starts below the column header because you select from
+   * the first item. pdf.js instead gives one long line per page with columns
+   * separated by runs of spaces. Trimming each line puts a row's model number
+   * at the start of it, which is where the invoice parser looks.
+   *
+   * Only quotes and invoices are tried — not the loose fallback parser, which
+   * on this kind of text invents items priced at $1 rather than finding none.
+   */
+  function parsePastedText(text) {
+    const normalized = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join('\n');
+    if (!normalized) return [];
+
+    const items = parseQuoteText(normalized);
+    if (items.length > 0) return items;
+
+    return parseInvoiceText(normalized, { requireHeader: false });
+  }
+
+  function handleReadPastedText() {
+    const items = parsePastedText(pastedText);
+
+    if (items.length > 0) {
+      const source = items[0]._source || 'text';
+      setParseResults({ success: true, message: `Found ${items.length} appliance(s) from ${source}`, items });
+    } else {
+      setParseResults({
+        success: false,
+        message: 'No appliance data found. Paste the item lines from a quote or invoice — each line needs a model number and a price.',
+      });
+    }
+  }
+
+  function handleClearPastedText() {
+    setPastedText('');
+    setParseResults(null);
+  }
+
   function parseCSV(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -711,6 +745,7 @@ export default function DocumentUpload({ onParsedItems }) {
       onParsedItems(cleaned);
       setParseResults(null);
       setFileName(null);
+      setPastedText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
@@ -733,6 +768,34 @@ export default function DocumentUpload({ onParsedItems }) {
 
   return (
     <div className="space-y-4">
+      {mode === 'paste' ? (
+        <div className="space-y-3">
+          <textarea
+            value={pastedText}
+            onChange={(e) => setPastedText(e.target.value)}
+            rows={12}
+            spellCheck={false}
+            placeholder={
+              'Select the item lines in your quote or invoice, copy, and paste them here.\n\n' +
+              'LG, DISHWASHER, SS (LDNPQ445S) N/A 1 $775.98 $775.98\n' +
+              'LG, RANGE, ELEC, S/C, SS (LREN6323YE) N/A 1 $1,163.98 $1,163.98\n\n' +
+              'More than one page? Paste them one after another.'
+            }
+            className="w-full rounded-xl bg-slate-900/60 border border-slate-700 focus:border-blue-500 focus:outline-none p-3 text-sm text-slate-200 placeholder:text-slate-600 font-mono resize-y"
+          />
+          <div className="flex items-center gap-3">
+            <button onClick={handleReadPastedText} disabled={!pastedText.trim()} className="btn-primary text-sm py-2 disabled:opacity-40">
+              Read Pasted Text
+            </button>
+            {pastedText && (
+              <button onClick={handleClearPastedText} className="btn-secondary text-sm py-2">
+                Clear
+              </button>
+            )}
+            <span className="text-slate-500 text-xs ml-auto">Read on this computer, never sent anywhere</span>
+          </div>
+        </div>
+      ) : (
       <div
         className={`upload-zone ${isDragging ? 'upload-zone-active' : ''}`}
         onDragOver={handleDragOver}
@@ -769,6 +832,7 @@ export default function DocumentUpload({ onParsedItems }) {
           </>
         )}
       </div>
+      )}
 
       {parseResults && (
         <div

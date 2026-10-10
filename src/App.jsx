@@ -4,6 +4,7 @@ import ApplianceList from './components/ApplianceList';
 import DocumentUpload from './components/DocumentUpload';
 import ResultsPanel from './components/ResultsPanel';
 import { calculateAll } from './utils/calculator';
+import { warmPdfEngine } from './utils/pdfEngine';
 import { WARRANTY_YEARS } from './data/warrantyPricing';
 
 export default function App() {
@@ -28,6 +29,12 @@ export default function App() {
 
   const calcIdRef = useRef(0);
   const pregenIdRef = useRef(0);
+
+  // Start the PDF reading engine on page open, whichever tab you land on, so
+  // reading a document later needs no network at all.
+  useEffect(() => {
+    warmPdfEngine();
+  }, []);
 
   // Theme toggle
   useEffect(() => {
@@ -310,6 +317,17 @@ export default function App() {
                   Read Document
                 </span>
               </button>
+              <button
+                onClick={() => setInputMode('paste')}
+                className={inputMode === 'paste' ? 'tab-button-active' : 'tab-button-inactive'}
+              >
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  Paste Text
+                </span>
+              </button>
 
               {appliances.length > 0 && (
                 <button onClick={clearAll} className="btn-danger text-xs ml-2">
@@ -323,7 +341,11 @@ export default function App() {
             {inputMode === 'manual' ? (
               <ApplianceForm onAdd={addAppliance} />
             ) : (
-              <DocumentUpload onParsedItems={addParsedItems} />
+              <DocumentUpload
+                key={inputMode}
+                mode={inputMode === 'paste' ? 'paste' : 'file'}
+                onParsedItems={addParsedItems}
+              />
             )}
 
             <ApplianceList
