@@ -119,6 +119,13 @@ function isValidModel(str) {
 // appliance we'd write a protection plan on.
 const MIN_ITEM_PRICE = 50;
 
+// Line items that are services or charges rather than appliances.
+const ACCESSORY_PATTERN = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
+
+// The "Create Credit Note Request" link that follows every model number in
+// the web invoice view, with no space between the two.
+const CREDIT_NOTE_LINK = /Create Credit Note Request/i;
+
 // What a single column header means, e.g. "MSRP*" → 'msrp', "Your Price" → 'price'.
 function columnRole(label) {
   const l = label.toLowerCase().replace(/[*#:.]/g, '').trim();
@@ -491,7 +498,7 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
     const seenModels = new Set();
 
     // Skip patterns for non-appliance lines
-    const skipPattern = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
+    const skipPattern = ACCESSORY_PATTERN;
 
     // Pages are joined with \n in parsePDF
     const pages = text.split('\n');
@@ -621,6 +628,66 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
   }
 
   /**
+   * Parse the web invoice view, copied out of the browser.
+   *
+   * Each line item is a block rather than a row: the model number runs
+   * straight into the "Create Credit Note Request" link text with no space,
+   * the description is the line below it, and the price sits a few lines
+   * further down, past any status, serial or invoice lines.
+   *
+   *     04    WA53CG7155ADA4Create Credit Note Request
+   *     SAMSUNG, WASHER, T/L, NAVY
+   *     Del(C)   26-Oct-26   IE27  1  1  $ 999.95
+   *
+   * Services and charges are told apart by their own item codes: hookups and
+   * installs begin with a 0, and accessories and charges carry no digits at
+   * all, so isValidModel rejects both.
+   */
+  function parseWebInvoiceText(text) {
+    const items = [];
+    const seenModels = new Set();
+    const lines = text.split(/\r?\n/).map((line) => line.trim());
+
+    for (let i = 0; i < lines.length; i++) {
+      const linkAt = lines[i].search(CREDIT_NOTE_LINK);
+      if (linkAt === -1) continue;
+
+      const model = lines[i].slice(0, linkAt).replace(/^\d{1,3}\s+/, '').trim();
+      if (!isValidModel(model) || seenModels.has(model)) continue;
+
+      // Description is the next non-empty line; the price is the first amount
+      // after it, before the next line item starts.
+      let description = '';
+      let cost = null;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (!lines[j]) continue;
+        if (CREDIT_NOTE_LINK.test(lines[j])) break;
+        if (!description) description = lines[j];
+        const money = lines[j].match(/\$\s*([\d,]+\.\d{2})/);
+        if (money) {
+          cost = parseFloat(money[1].replace(/,/g, ''));
+          break;
+        }
+      }
+
+      if (cost === null || isNaN(cost) || cost < MIN_ITEM_PRICE) continue;
+      if (ACCESSORY_PATTERN.test(description) || ACCESSORY_PATTERN.test(model)) continue;
+
+      seenModels.add(model);
+      items.push({
+        id: crypto.randomUUID(),
+        model,
+        cost,
+        isSmall: false,
+        description: cleanDescription(description),
+        _source: 'Invoice',
+      });
+    }
+
+    return items;
+  }
+
+  /**
    * Parse text pasted straight out of a PDF viewer.
    *
    * It's the same quote/invoice formatting, but shaped differently from what
@@ -636,6 +703,12 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
   function parsePastedText(text) {
     const normalized = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join('\n');
     if (!normalized) return [];
+
+    // The web invoice view has an unmistakable signature, so check it first.
+    if (CREDIT_NOTE_LINK.test(normalized)) {
+      const webItems = parseWebInvoiceText(normalized);
+      if (webItems.length > 0) return webItems;
+    }
 
     const items = parseQuoteText(normalized);
     if (items.length > 0) return items;
