@@ -3,9 +3,11 @@ import ApplianceForm from './components/ApplianceForm';
 import ApplianceList from './components/ApplianceList';
 import DocumentUpload from './components/DocumentUpload';
 import ResultsPanel from './components/ResultsPanel';
+import SettingsPanel from './components/SettingsPanel';
 import { calculateAll } from './utils/calculator';
 import { warmPdfEngine } from './utils/pdfEngine';
 import { WARRANTY_YEARS } from './data/warrantyPricing';
+import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './utils/displaySettings';
 
 export default function App() {
   const [appliances, setAppliances] = useState([]);
@@ -15,6 +17,9 @@ export default function App() {
   const [excludedIds, setExcludedIds] = useState(new Set());
   const [save3Active, setSave3Active] = useState(false);
   const [save3Exclusions, setSave3Exclusions] = useState(new Set());
+  const [essentialIds, setEssentialIds] = useState(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState(loadSettings);
   const [lightMode, setLightMode] = useState(() => {
     try { return localStorage.getItem('wlc-theme') === 'light'; } catch { return false; }
   });
@@ -34,6 +39,25 @@ export default function App() {
   // reading a document later needs no network at all.
   useEffect(() => {
     warmPdfEngine();
+  }, []);
+
+  useEffect(() => {
+    saveSettings(settings);
+  }, [settings]);
+
+  const updateSetting = useCallback((key, value) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const resetSettings = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), []);
+
+  const toggleEssential = useCallback((id) => {
+    setEssentialIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
 
   // Theme toggle
@@ -76,6 +100,7 @@ export default function App() {
     setAppliances((prev) => prev.filter((a) => a.id !== id));
     setExcludedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     setSave3Exclusions((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    setEssentialIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     clearResults();
   }
 
@@ -93,6 +118,7 @@ export default function App() {
     setAppliances([]);
     setExcludedIds(new Set());
     setSave3Exclusions(new Set());
+    setEssentialIds(new Set());
     clearResults();
   }
 
@@ -261,6 +287,19 @@ export default function App() {
             </div>
           </div>
 
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="p-2.5 rounded-xl transition-all duration-200 hover:scale-105"
+            style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)', color: 'var(--text-muted)' }}
+            title="Display settings"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+
           {/* Day/Night mode toggle */}
           <button
             onClick={() => setLightMode(!lightMode)}
@@ -278,8 +317,18 @@ export default function App() {
               </svg>
             )}
           </button>
+          </div>
         </div>
       </header>
+
+      {settingsOpen && (
+        <SettingsPanel
+          settings={settings}
+          onChange={updateSetting}
+          onReset={resetSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* Input Section */}
@@ -357,6 +406,8 @@ export default function App() {
               save3Active={save3Active}
               save3Exclusions={save3Exclusions}
               onToggle3={toggleSave3ForItem}
+              essentialIds={essentialIds}
+              onToggleEssential={toggleEssential}
             />
           </div>
         </div>
@@ -419,6 +470,8 @@ export default function App() {
                 calculating={calculating}
                 excludedIds={excludedIds}
                 allAppliances={appliances}
+                settings={settings}
+                essentialIds={essentialIds}
               />
             </div>
           </div>
