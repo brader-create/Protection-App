@@ -263,7 +263,8 @@ function buildTurboResult(original, modified, maxDiscount, discountMap, calcResu
   };
 }
 
-function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds }) {
+function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, settings = {} }) {
+  const show = (key) => settings[key] !== false;
   const isBest = result.isCheapest && result.valid;
   const hasValidItems = result.items && result.items.some(i => i.price !== null);
   const hasErrors = result.items && result.items.some(i => i.error);
@@ -326,7 +327,7 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active, years,
             </p>
           )}
 
-          <div className="space-y-3">
+          <div className={`space-y-3 ${show('groupBreakdown') ? '' : 'hidden'}`}>
             {result.items.map((item, i) => {
               const isError = item.price === null;
               return (
@@ -395,7 +396,8 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active, years,
 }
 
 /** Best Mix card with integrated Turbo Charge */
-function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, appliances, onTurboResult }) {
+function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, appliances, onTurboResult, settings = {} }) {
+  const show = (key) => settings[key] !== false;
   const [turboActive, setTurboActive] = useState(false);
   const [turboLoading, setTurboLoading] = useState(false);
   const [turboResult, setTurboResult] = useState(null);
@@ -542,7 +544,7 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
           )}
 
           {/* Group breakdown — show turbo items if active, original items otherwise */}
-          <div className="space-y-3">
+          <div className={`space-y-3 ${show('groupBreakdown') ? '' : 'hidden'}`}>
             {(showingTurbo ? turboResult.turboItems : result.items).map((item, i) => {
               const isError = item.price === null;
               return (
@@ -618,7 +620,7 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
           </div>
 
           {/* Turbo Charge button — inside the card */}
-          <div className="mt-4 pt-3 border-t" style={{ borderColor: 'var(--border-light)' }}>
+          <div className={`mt-4 pt-3 border-t ${show('turboCharge') ? '' : 'hidden'}`} style={{ borderColor: 'var(--border-light)' }}>
             <button
               onClick={handleTurboToggle}
               disabled={turboLoading}
@@ -662,7 +664,7 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
             )}
 
             {/* Next Deal Suggestions */}
-            {turboActive && !turboLoading && nextDeals.length > 0 && (
+            {show('dealSuggestions') && turboActive && !turboLoading && nextDeals.length > 0 && (
               <div className="mt-3 rounded-lg p-3 border border-purple-500/15" style={{ background: 'var(--bg-card-inner)' }}>
                 <p className="text-[11px] font-bold text-purple-300 mb-2 flex items-center gap-1.5">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -706,7 +708,21 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
   );
 }
 
-export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances }) {
+export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances, settings = {}, essentialIds }) {
+  const show = (key) => settings[key] !== false;
+  const visibleCards = ['bestMixCard', 'singleBundleCard', 'individualCard'].filter(show).length;
+  // Essentials: the best bundle for just the starred models, as a smaller
+  // recommendation when a client doesn't want to cover everything.
+  const essentials = useMemo(() => {
+    if (!essentialIds || essentialIds.size === 0) return null;
+    const starred = appliances.filter((a) => essentialIds.has(a.id));
+    if (starred.length === 0) return null;
+    const result = calculateAll(starred, activeYear);
+    if (!result || result.cheapestPrice === null) return { appliances: starred, result: null };
+    const best = [result.bestMix, result.singleBundle, result.individual]
+      .find((r) => r?.valid && r.total === result.cheapestPrice);
+    return { appliances: starred, result, best, total: result.cheapestPrice };
+  }, [essentialIds, appliances, activeYear]);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThresholds, setShowThresholds] = useState(false);
@@ -744,6 +760,11 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
   const warrantyPct = totalApplianceCost > 0 && cheapestPrice !== null
     ? ((cheapestPrice / totalApplianceCost) * 100).toFixed(1)
     : null;
+  // The same figure spread over the term, e.g. a 3-year plan at 9.6% is 3.2%/yr.
+  const warrantyPctPerYear = warrantyPct !== null && activeYear > 0
+    ? (parseFloat(warrantyPct) / activeYear).toFixed(1)
+    : null;
+
 
   // Deselected models: compute individual warranty cost for each excluded item
   const deselectedInfo = useMemo(() => {
@@ -771,7 +792,10 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
     setGenerating(true);
     setTimeout(() => {
       try {
-        generateComparisonPDF(appliances);
+        generateComparisonPDF(appliances, {
+          settings,
+          essentialAppliances: essentials?.appliances ?? [],
+        });
       } catch (err) {
         console.error('PDF generation error:', err);
       }
@@ -909,7 +933,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
       </div>
 
       {/* Save 3% Savings Banner */}
-      {save3Active && totalSaved > 0 && (
+      {save3Active && totalSaved > 0 && show('save3Banner') && (
         <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-amber-500/20 rounded-full flex items-center justify-center shrink-0">
@@ -930,7 +954,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
       )}
 
       {/* Turbo Savings Banner */}
-      {turboSavings && (
+      {show('turboCharge') && turboSavings && (
         <div className="bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent border border-purple-500/20 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center shrink-0">
@@ -956,7 +980,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
       )}
 
       {/* Best Price Banner + Percentage Meter */}
-      {cheapestPrice !== null && (
+      {cheapestPrice !== null && show('bestPriceBanner') && (
         <div className="bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-emerald-500/20 rounded-full flex items-center justify-center shrink-0">
@@ -968,11 +992,14 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
               <p className="text-sm text-emerald-300/70">Lowest Available Price ({activeYear}-Year)</p>
               <div className="flex items-baseline gap-3">
                 <p className="text-2xl font-bold text-emerald-400 tabular-nums">{formatPrice(cheapestPrice)}</p>
-                {warrantyPct !== null && (
+                {warrantyPct !== null && show('percentOfCost') && (
                   <span className="text-sm font-semibold text-emerald-300/60 tabular-nums">{warrantyPct}% of appliance cost</span>
                 )}
+                {warrantyPctPerYear !== null && show('percentPerYear') && (
+                  <span className="text-sm font-semibold text-emerald-300/40 tabular-nums">{warrantyPctPerYear}% per year</span>
+                )}
               </div>
-              {warrantyPct !== null && (
+              {warrantyPct !== null && show('percentMeter') && (
                 <div className="mt-2 w-full max-w-xs">
                   <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-inner)' }}>
                     <div
@@ -988,7 +1015,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
       )}
 
       {/* Deselected Models Info */}
-      {deselectedInfo.length > 0 && (
+      {deselectedInfo.length > 0 && show('deselectedModels') && (
         <div className="rounded-xl p-4 border border-slate-500/20" style={{ background: 'var(--bg-card-inner)' }}>
           <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>Deselected Models — Individual Warranty Cost</p>
           <div className="space-y-1">
@@ -1009,34 +1036,87 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <BestMixCard
-          result={bestMix}
-          cheapestPrice={cheapestPrice}
-          originalResult={originalResults?.bestMix}
-          save3Active={save3Active}
-          years={activeYear}
-          showThresholds={showThresholds}
-          appliances={appliances}
-          onTurboResult={setTurboSavings}
-        />
-        <ResultCard
-          result={singleBundle}
-          cheapestPrice={cheapestPrice}
-          originalResult={originalResults?.singleBundle}
-          save3Active={save3Active}
-          years={activeYear}
-          showThresholds={false}
-        />
-        <ResultCard
-          result={individual}
-          cheapestPrice={cheapestPrice}
-          originalResult={originalResults?.individual}
-          save3Active={save3Active}
-          years={activeYear}
-          showThresholds={false}
-        />
+      <div className={`grid grid-cols-1 gap-4 ${visibleCards === 1 ? '' : visibleCards === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-3'}`}>
+        {show('bestMixCard') && (
+          <BestMixCard
+            result={bestMix}
+            cheapestPrice={cheapestPrice}
+            originalResult={originalResults?.bestMix}
+            save3Active={save3Active}
+            years={activeYear}
+            showThresholds={showThresholds}
+            appliances={appliances}
+            onTurboResult={setTurboSavings}
+            settings={settings}
+          />
+        )}
+        {show('singleBundleCard') && (
+          <ResultCard
+            result={singleBundle}
+            cheapestPrice={cheapestPrice}
+            originalResult={originalResults?.singleBundle}
+            save3Active={save3Active}
+            years={activeYear}
+            showThresholds={false}
+            settings={settings}
+          />
+        )}
+        {show('individualCard') && (
+          <ResultCard
+            result={individual}
+            cheapestPrice={cheapestPrice}
+            originalResult={originalResults?.individual}
+            save3Active={save3Active}
+            years={activeYear}
+            showThresholds={false}
+            settings={settings}
+          />
+        )}
       </div>
+
+      {/* Essentials — the best bundle for the starred models only */}
+      {essentials && show('essentialsCard') && (
+        <div className="rounded-xl p-4 border border-amber-500/25" style={{ background: 'var(--bg-card-inner)' }}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-amber-300">Essentials ({activeYear}-Year)</p>
+                <p className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                  {essentials.appliances.length} starred model{essentials.appliances.length === 1 ? '' : 's'}
+                  {essentials.best ? ` — ${essentials.best.label}` : ''}
+                </p>
+              </div>
+            </div>
+            <p className="text-2xl font-bold text-amber-400 tabular-nums">
+              {essentials.total != null ? formatPrice(essentials.total) : 'No bracket'}
+            </p>
+          </div>
+
+          {essentials.best && show('groupBreakdown') && (
+            <div className="mt-3 pt-3 border-t border-amber-500/15 space-y-2">
+              {essentials.best.items.map((item, i) => (
+                <div key={i}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold" style={{ color: 'var(--text-muted)' }}>{item.groupLabel}</span>
+                    <span className="tabular-nums font-semibold text-amber-300">{formatPrice(item.price)}</span>
+                  </div>
+                  <div className="mt-0.5 pl-2 space-y-0.5">
+                    {item.appliances.map((app) => (
+                      <div key={app.id} className="flex items-center justify-between text-xs" style={{ color: 'var(--text-faint)' }}>
+                        <span className="truncate mr-2">{app.model}</span>
+                        <span className="tabular-nums shrink-0">${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

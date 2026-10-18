@@ -11,8 +11,14 @@ function formatPrice(price) {
 /**
  * Generate a PDF comparing warranty plans across 2, 3, and 4 year terms.
  * Compact layout with side-by-side breakdowns.
+ *
+ * `settings` says which sections to include (see utils/displaySettings);
+ * anything missing from it is included, so an older saved set of settings
+ * never silently drops a section. `essentialAppliances` are the starred
+ * models, printed as their own smaller recommendation when turned on.
  */
-export function generateComparisonPDF(appliances) {
+export function generateComparisonPDF(appliances, { settings = {}, essentialAppliances = [] } = {}) {
+  const show = (key) => settings[key] !== false;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 15;
@@ -32,12 +38,17 @@ export function generateComparisonPDF(appliances) {
   doc.setTextColor(148, 163, 184);
   doc.text('Pricing Comparison', margin, 26);
 
-  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  doc.text(today, pageWidth - margin, 26, { align: 'right' });
+  if (show('pdfDate')) {
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    doc.text(today, pageWidth - margin, 26, { align: 'right' });
+  }
 
   y = 46;
 
   // --- Appliance List ---
+  let tableResult = null;
+
+  if (show('pdfApplianceList')) {
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
@@ -51,9 +62,11 @@ export function generateComparisonPDF(appliances) {
   ]);
 
   const totalCost = appliances.reduce((sum, a) => sum + a.cost, 0);
-  applianceRows.push(['', 'Total', formatPrice(totalCost)]);
+  if (show('pdfApplianceTotal')) {
+    applianceRows.push(['', 'Total', formatPrice(totalCost)]);
+  }
 
-  let tableResult = autoTable(doc, {
+  tableResult = autoTable(doc, {
     startY: y,
     head: [['#', 'Model / Description', 'Cost']],
     body: applianceRows,
@@ -75,7 +88,7 @@ export function generateComparisonPDF(appliances) {
       2: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
     },
     didParseCell: (data) => {
-      if (data.row.index === applianceRows.length - 1) {
+      if (show('pdfApplianceTotal') && data.row.index === applianceRows.length - 1) {
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [241, 245, 249];
       }
@@ -83,6 +96,7 @@ export function generateComparisonPDF(appliances) {
   });
 
   y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 30) + 10;
+  }
 
   // --- Calculate for all years ---
   const allResults = {};
@@ -90,19 +104,20 @@ export function generateComparisonPDF(appliances) {
     allResults[yr] = calculateAll(appliances, yr);
   }
 
-  // --- Pricing Comparison Table ---
-  doc.setTextColor(30, 41, 59);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Pricing Comparison', margin, y);
-  y += 2;
-
   const strategies = ['bestMix', 'singleBundle', 'individual'];
   const strategyLabels = {
     bestMix: 'Best Mix',
     singleBundle: 'Single Bundle',
     individual: 'Individual',
   };
+
+  // --- Pricing Comparison Table ---
+  if (show('pdfComparisonTable')) {
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Pricing Comparison', margin, y);
+  y += 2;
 
   const comparisonRows = strategies.map((key) => {
     const row = [strategyLabels[key]];
@@ -161,6 +176,7 @@ export function generateComparisonPDF(appliances) {
   });
 
   y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 30) + 8;
+  }
 
   // --- Compact Side-by-Side Breakdown ---
   // Build breakdown data for all 3 years
@@ -191,6 +207,7 @@ export function generateComparisonPDF(appliances) {
   // Draw all 3 breakdowns as columns side by side
   const colWidth = (pageWidth - margin * 2 - 6) / 3; // 3mm gaps between cols
 
+  if (show('pdfBreakdown')) {
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
@@ -239,6 +256,75 @@ export function generateComparisonPDF(appliances) {
 
   // Find max height used
   y = startY + 80; // reserve space, will be adjusted by content
+  }
+
+  // --- Essentials: the starred models priced on their own ---
+  if (show('pdfEssentials') && essentialAppliances.length > 0) {
+    const essentialResults = {};
+    for (const yr of WARRANTY_YEARS) {
+      essentialResults[yr] = calculateAll(essentialAppliances, yr);
+    }
+
+    if (y > 215) {
+      doc.addPage();
+      y = margin;
+    }
+
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Essentials', margin, y);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Selected models covered on their own', margin + 24, y);
+    y += 2;
+
+    const essentialRows = essentialAppliances.map((app, i) => [
+      (i + 1).toString(),
+      app.model,
+      formatPrice(app.cost),
+    ]);
+
+    const essentialPrices = ['Protection plan'];
+    for (const yr of WARRANTY_YEARS) {
+      const best = essentialResults[yr]?.cheapestPrice;
+      essentialPrices.push(best != null ? formatPrice(best) : '—');
+    }
+
+    tableResult = autoTable(doc, {
+      startY: y,
+      head: [['#', 'Model / Description', 'Cost']],
+      body: essentialRows,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 8.5, cellPadding: 2, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [180, 83, 9], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+      },
+    });
+
+    y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 20) + 3;
+
+    tableResult = autoTable(doc, {
+      startY: y,
+      head: [['Essentials', '2-Year', '3-Year', '4-Year']],
+      body: [essentialPrices],
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 9, cellPadding: 3, textColor: [30, 41, 59] },
+      headStyles: { fillColor: [180, 83, 9], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 40, fontStyle: 'bold' },
+        1: { cellWidth: 'auto', halign: 'center' },
+        2: { cellWidth: 'auto', halign: 'center' },
+        3: { cellWidth: 'auto', halign: 'center' },
+      },
+    });
+
+    y = (tableResult?.finalY ?? doc.lastAutoTable?.finalY ?? y + 20) + 8;
+  }
 
   // --- Footer ---
   doc.setFontSize(7);
