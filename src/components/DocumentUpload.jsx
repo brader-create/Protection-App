@@ -119,6 +119,16 @@ function isValidModel(str) {
 // appliance we'd write a protection plan on.
 const MIN_ITEM_PRICE = 50;
 
+// A fridge or microwave this cheap may be a compact model priced on the
+// small-appliance table — which only runs to $1,000 — so whoever adds it is
+// asked rather than the app guessing.
+const SMALL_APPLIANCE_LIMIT = 1000;
+const SMALL_CANDIDATE_TYPES = /refrigerator|microwave/i;
+
+function mightBeSmall(item) {
+  return item.cost <= SMALL_APPLIANCE_LIMIT && SMALL_CANDIDATE_TYPES.test(item.description || '');
+}
+
 // Line items that are services or charges rather than appliances.
 const ACCESSORY_PATTERN = /(?:delivery|install|hose\s*kit|bracket|connector|cpp|protection\s*plan|protected\s*item|labour|labor|service\s*call|accessory|accessories|haul\s*away)/i;
 
@@ -327,6 +337,8 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState(null);
   const [parseResults, setParseResults] = useState(null);
+  // Answers to "small appliance?", by item id: true or false.
+  const [smallAnswers, setSmallAnswers] = useState({});
   const [loading, setLoading] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const fileInputRef = useRef(null);
@@ -733,6 +745,7 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
   function handleClearPastedText() {
     setPastedText('');
     setParseResults(null);
+    setSmallAnswers({});
   }
 
   function parseCSV(file) {
@@ -813,10 +826,13 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
 
   function handleAddAll() {
     if (parseResults?.items) {
-      // Clean up internal _source field before passing to parent
-      const cleaned = parseResults.items.map(({ _source, ...rest }) => rest);
+      // Clean up internal _source field before passing to parent, applying
+      // any small-appliance answers. Unanswered ones keep what was parsed.
+      const cleaned = parseResults.items.map(({ _source, ...rest }) =>
+        rest.id in smallAnswers ? { ...rest, isSmall: smallAnswers[rest.id] } : rest);
       onParsedItems(cleaned);
       setParseResults(null);
+      setSmallAnswers({});
       setFileName(null);
       setPastedText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -835,6 +851,7 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
 
   function handleClear() {
     setParseResults(null);
+    setSmallAnswers({});
     setFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
@@ -919,8 +936,11 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
 
           {parseResults.items && (
             <div className="mt-3 space-y-1">
-              {parseResults.items.map((item) => (
-                <div key={item.id} className="flex items-center justify-between text-sm py-1.5">
+              {parseResults.items.map((item) => {
+                const answer = smallAnswers[item.id];
+                return (
+                <div key={item.id} className="py-1.5">
+                <div className="flex items-center justify-between text-sm">
                   <div className="min-w-0 flex-1 mr-3">
                     <span className="text-slate-300 font-medium">{item.model}</span>
                     {item.description && (
@@ -940,7 +960,33 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
                     </button>
                   </div>
                 </div>
-              ))}
+                {mightBeSmall(item) && (
+                  <div className="flex items-center gap-2 mt-1 text-xs" role="group" aria-label={`Is ${item.model} a small appliance?`}>
+                    <span className="text-amber-300">Small appliance?</span>
+                    {[true, false].map((value) => (
+                      <button
+                        key={String(value)}
+                        type="button"
+                        aria-pressed={answer === value}
+                        onClick={() => setSmallAnswers((prev) => ({ ...prev, [item.id]: value }))}
+                        className={`px-2.5 py-0.5 rounded-full border text-[11px] font-semibold transition-colors ${
+                          answer === value
+                            ? 'bg-amber-500/25 border-amber-400/60 text-amber-200'
+                            : 'border-slate-600 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {value ? 'Yes' : 'No'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                </div>
+                );
+              })}
+
+              {parseResults.items.some((item) => mightBeSmall(item) && !(item.id in smallAnswers)) && (
+                <p className="text-xs text-slate-500 mt-2">Unanswered small-appliance questions count as No.</p>
+              )}
 
               <div className="flex gap-3 mt-4 pt-3 border-t border-emerald-500/20">
                 <button onClick={handleAddAll} className="btn-success text-sm py-2">

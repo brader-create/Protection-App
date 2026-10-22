@@ -11,6 +11,7 @@ export default function ApplianceList({
   onToggle3,
   essentialIds,
   onToggleEssential,
+  layout = 'rows',
 }) {
   const [editingId, setEditingId] = useState(null);
   const [editModel, setEditModel] = useState('');
@@ -53,8 +54,19 @@ export default function ApplianceList({
   const enabledAppliances = appliances.filter((a) => !excludedIds.has(a.id));
   const totalCost = enabledAppliances.reduce((sum, a) => sum + a.cost, 0);
 
+  // Cells: as many across as there are appliances, up to 4, fewer on narrow
+  // screens. (Spelled out so Tailwind keeps the classes.)
+  const cells = layout === 'cells';
+  const cellColumns = [
+    'grid-cols-1',
+    'grid-cols-1 sm:grid-cols-2',
+    'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+    'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4',
+  ][Math.min(4, appliances.length) - 1];
+
   return (
-    <div className="space-y-2">
+    <div>
+    <div className={cells ? `grid gap-2 ${cellColumns}` : 'space-y-2'}>
       {appliances.map((app, index) => {
         const isExcluded = excludedIds.has(app.id);
         const isEditing = editingId === app.id;
@@ -64,7 +76,7 @@ export default function ApplianceList({
 
         if (isEditing) {
           return (
-            <div key={app.id} className="appliance-row flex-wrap">
+            <div key={app.id} className={`appliance-row flex-wrap ${cells ? 'col-span-full' : ''}`}>
               <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
               <input
                 type="text"
@@ -114,86 +126,127 @@ export default function ApplianceList({
           );
         }
 
+        const includeBox = (
+          <input
+            type="checkbox"
+            checked={!isExcluded}
+            onChange={() => onToggle(app.id)}
+            className="w-4 h-4 rounded border-slate-600 text-blue-500 bg-slate-700 cursor-pointer accent-blue-500 shrink-0"
+            title={isExcluded ? 'Include in calculation' : 'Exclude from calculation'}
+          />
+        );
+        const number = (
+          <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
+        );
+        const name = (
+          <span className={`font-medium truncate block ${isExcluded ? 'line-through' : ''}`} style={{ color: isExcluded ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+            {app.model}
+          </span>
+        );
+        const description = app.description && (
+          <span className="text-xs truncate block" style={{ color: 'var(--text-muted)' }}>{app.description}</span>
+        );
+        const smallBadge = app.isSmall && <span className="badge-amber text-[10px] shrink-0">Small</span>;
+        const star = (
+          <button
+            onClick={() => onToggleEssential(app.id)}
+            className={`p-1 rounded-lg transition-all shrink-0 ${isEssential ? 'text-amber-400' : 'hover:text-amber-400/70'}`}
+            style={!isEssential ? { color: 'var(--text-faint)' } : {}}
+            title={isEssential ? 'In Essentials — click to remove' : 'Add to Essentials'}
+            aria-pressed={isEssential}
+          >
+            <svg className="w-4 h-4" fill={isEssential ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+            </svg>
+          </button>
+        );
+        const save3Chip = save3Active && (
+          <button
+            onClick={() => onToggle3(app.id)}
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all shrink-0 flex items-center gap-1 ${
+              has3
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                : 'bg-slate-800/50 text-slate-600 border-slate-700/30 hover:text-slate-400'
+            }`}
+            title={has3 ? `3% off: $${discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'Click to include in 3% savings'}
+          >
+            3%
+            {has3 && (
+              <span className="tabular-nums">${discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            )}
+          </button>
+        );
+        const cost = (
+          <span className={`font-semibold tabular-nums shrink-0 ${has3 ? 'line-through text-sm' : ''}`} style={{ color: isExcluded ? 'var(--text-muted)' : has3 ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+            ${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </span>
+        );
+        const editButton = (
+          <button
+            onClick={() => startEdit(app)}
+            className="p-1.5 hover:bg-blue-600/20 rounded-lg transition-colors"
+            style={{ color: 'var(--text-muted)' }}
+            title="Edit appliance"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+        );
+        const removeButton = (
+          <button
+            onClick={() => onRemove(app.id)}
+            className="p-1.5 hover:bg-red-600/20 rounded-lg hover:text-red-400 transition-colors"
+            style={{ color: 'var(--text-muted)' }}
+            title="Remove appliance"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        );
+
+        if (cells) {
+          return (
+            <div key={app.id} className={`appliance-cell flex flex-col gap-1.5 rounded-xl px-3 py-2.5 transition-opacity ${isExcluded ? 'opacity-35' : ''}`}
+              style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-light)' }}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {includeBox}
+                <span className="text-xs font-mono shrink-0" style={{ color: 'var(--text-faint)' }}>{index + 1}</span>
+                <div className="flex-1 min-w-0">{name}</div>
+                {star}
+              </div>
+              {description && <div className="pl-6 min-w-0">{description}</div>}
+              <div className="flex items-center gap-1.5 pl-6 flex-wrap">
+                {smallBadge}
+                {save3Chip}
+                <span className="ml-auto">{cost}</span>
+                {editButton}
+                {removeButton}
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div key={app.id} className={`appliance-row transition-opacity ${isExcluded ? 'opacity-35' : ''}`}>
-            <input
-              type="checkbox"
-              checked={!isExcluded}
-              onChange={() => onToggle(app.id)}
-              className="w-4 h-4 rounded border-slate-600 text-blue-500 bg-slate-700 cursor-pointer accent-blue-500 shrink-0"
-              title={isExcluded ? 'Include in calculation' : 'Exclude from calculation'}
-            />
-
-            <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
-
+            {includeBox}
+            {number}
             <div className="flex-1 min-w-0">
-              <span className={`font-medium truncate block ${isExcluded ? 'line-through' : ''}`} style={{ color: isExcluded ? 'var(--text-muted)' : 'var(--text-primary)' }}>
-                {app.model}
-              </span>
-              {app.description && (
-                <span className="text-xs truncate block" style={{ color: 'var(--text-muted)' }}>{app.description}</span>
-              )}
+              {name}
+              {description}
             </div>
-
-            {app.isSmall && <span className="badge-amber text-[10px] shrink-0">Small</span>}
-
-            <button
-              onClick={() => onToggleEssential(app.id)}
-              className={`p-1 rounded-lg transition-all shrink-0 ${isEssential ? 'text-amber-400' : 'hover:text-amber-400/70'}`}
-              style={!isEssential ? { color: 'var(--text-faint)' } : {}}
-              title={isEssential ? 'In Essentials — click to remove' : 'Add to Essentials'}
-              aria-pressed={isEssential}
-            >
-              <svg className="w-4 h-4" fill={isEssential ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-              </svg>
-            </button>
-
-            {save3Active && (
-              <button
-                onClick={() => onToggle3(app.id)}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all shrink-0 flex items-center gap-1 ${
-                  has3
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                    : 'bg-slate-800/50 text-slate-600 border-slate-700/30 hover:text-slate-400'
-                }`}
-                title={has3 ? `3% off: $${discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'Click to include in 3% savings'}
-              >
-                3%
-                {has3 && (
-                  <span className="tabular-nums">${discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                )}
-              </button>
-            )}
-
-            <span className={`font-semibold tabular-nums shrink-0 ${has3 ? 'line-through text-sm' : ''}`} style={{ color: isExcluded ? 'var(--text-muted)' : has3 ? 'var(--text-muted)' : 'var(--text-primary)' }}>
-              ${app.cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </span>
-
-            <button
-              onClick={() => startEdit(app)}
-              className="p-1.5 hover:bg-blue-600/20 rounded-lg transition-colors"
-              style={{ color: 'var(--text-muted)' }}
-              title="Edit appliance"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-            </button>
-
-            <button
-              onClick={() => onRemove(app.id)}
-              className="p-1.5 hover:bg-red-600/20 rounded-lg hover:text-red-400 transition-colors"
-              style={{ color: 'var(--text-muted)' }}
-              title="Remove appliance"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            {smallBadge}
+            {star}
+            {save3Chip}
+            {cost}
+            {editButton}
+            {removeButton}
           </div>
         );
       })}
+    </div>
 
       <div className="flex items-center justify-between pt-3 mt-3 px-4" style={{ borderTop: '1px solid var(--border-main)' }}>
         <span className="text-sm" style={{ color: 'var(--text-muted)' }}>

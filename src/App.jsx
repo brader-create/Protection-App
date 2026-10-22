@@ -427,6 +427,7 @@ export default function App() {
               onToggle3={toggleSave3ForItem}
               essentialIds={essentialIds}
               onToggleEssential={toggleEssential}
+              layout={settings.applianceLayout}
             />
           </div>
         </div>

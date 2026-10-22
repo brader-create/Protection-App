@@ -1,4 +1,4 @@
-import { HOME_MODES, PDF_APPLIANCE_STYLES, PDF_COMPARE_OPTIONS } from '../utils/displaySettings';
+import { HOME_MODES, APPLIANCE_LAYOUTS, PDF_APPLIANCE_STYLES, PDF_COMPARE_OPTIONS } from '../utils/displaySettings';
 
 function GroupHeading({ title, subtitle }) {
   return (
@@ -132,6 +132,19 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose, es
                   </button>
                 );
               })}
+            </div>
+
+            <div className="mt-5">
+              <FieldLabel>Appliance list</FieldLabel>
+              <Segmented
+                label="Appliance list"
+                options={APPLIANCE_LAYOUTS}
+                value={settings.applianceLayout}
+                onChange={(value) => onChange('applianceLayout', value)}
+              />
+              <p className="text-xs mt-1.5" style={{ color: 'var(--text-faint)' }}>
+                {APPLIANCE_LAYOUTS.find((layout) => layout.key === settings.applianceLayout)?.hint}
+              </p>
             </div>
           </div>
 
