@@ -38,15 +38,20 @@ const COLOR = {
   totalRow: [241, 245, 249],
   breakdownHead: [226, 232, 240],
   best: [5, 150, 105],
-  // Essentials is the secondary option: amber only for its title and outline.
-  essentials: [180, 83, 9],
-  essentialsLine: [245, 196, 120],
+  bestFill: [236, 253, 245],
+  // Essentials Only marks its prices in orange, and nothing else.
+  essentialsCost: [234, 88, 12],
 };
+
+// The terms are years added on top of the manufacturer's warranty.
+const termLabel = (yr) => `${yr}-Year Additional`;
 
 function formatPrice(price) {
   if (price === null || price === undefined) return '—';
   return '$' + price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+const formatPercent = (fraction) => `${(fraction * 100).toFixed(1)}%`;
 
 /**
  * Build the comparison PDF without saving it.
@@ -57,10 +62,11 @@ function formatPrice(price) {
  * an order too big to fit even then gets one page taller than A4, so it still
  * never breaks across pages.
  *
- * `settings` (see utils/displaySettings) chooses the appliance list style and
- * which options the pricing comparison lists. `essentialAppliances` are the
- * starred models: when there are any, the page is headed "Full Coverage" and
- * an Essentials plan for just those follows it.
+ * `settings` (see utils/displaySettings) chooses the appliance list style,
+ * which options the pricing comparison lists, and whether percentages and
+ * savings are shown. `essentialAppliances` are the starred models: when there
+ * are any, the page is headed "Full Coverage" and an "Essentials Only" plan
+ * for just those follows it.
  */
 export function buildComparisonPDF(appliances, { settings = {}, essentialAppliances = [] } = {}) {
   const data = prepare(appliances, essentialAppliances, settings);
@@ -79,7 +85,7 @@ export function buildComparisonPDF(appliances, { settings = {}, essentialApplian
 }
 
 export function generateComparisonPDF(appliances, options) {
-  buildComparisonPDF(appliances, options).doc.save('warranty-comparison.pdf');
+  buildComparisonPDF(appliances, options).doc.save('appliance-protection-plans.pdf');
 }
 
 // The option per term with the lowest total among `strategies`, preferring
@@ -93,10 +99,20 @@ function cheapestOption(result, strategies) {
   return bestKey;
 }
 
+// Share of the appliance cost, per year, and what it saves against covering
+// each appliance on its own — for one term's chosen plan.
+function figuresFor(planTotal, applianceCost, individual, yr) {
+  if (planTotal == null || !(applianceCost > 0)) return null;
+  const share = planTotal / applianceCost;
+  const saving = individual?.valid ? individual.total - planTotal : 0;
+  return { share, perYear: share / yr, saving: saving > 0.005 ? saving : 0 };
+}
+
 function prepare(appliances, essentialAppliances, settings) {
   let strategies = STRATEGIES.filter((key) => settings[COMPARE_SETTING[key]] !== false);
   if (strategies.length === 0) strategies = STRATEGIES;
 
+  const applianceCost = appliances.reduce((sum, a) => sum + a.cost, 0);
   const results = {};
   const best = {};
   for (const yr of WARRANTY_YEARS) {
@@ -108,23 +124,28 @@ function prepare(appliances, essentialAppliances, settings) {
 
   let essentials = null;
   if (essentialAppliances.length > 0) {
+    const cost = essentialAppliances.reduce((sum, a) => sum + a.cost, 0);
     const plans = {};
+    const figures = {};
     for (const yr of WARRANTY_YEARS) {
       // Essentials is always the true best bundle for those models, however
       // the comparison above is filtered.
       const result = calculateAll(essentialAppliances, yr);
       const key = cheapestOption(result, STRATEGIES);
       plans[yr] = key ? result[key] : null;
+      figures[yr] = figuresFor(plans[yr]?.total, cost, result.individual, yr);
     }
-    essentials = { appliances: essentialAppliances, plans };
+    essentials = { appliances: essentialAppliances, cost, plans, figures };
   }
 
   return {
     appliances,
+    applianceCost,
     results,
     best,
     strategies,
     condensed: settings.pdfApplianceStyle === 'condensed',
+    percentages: settings.pdfPercentages === true,
     essentials,
   };
 }
@@ -170,7 +191,7 @@ function metricsFor(d) {
     comparisonFont: 9 * d,
     comparisonPadding: Math.max(0.8, 3 * d),
     sectionGap: 8 * d,
-    breakdownHeadHeight: 7 * d,
+    breakdownHeadHeight: 11 * d,
     breakdownHeadFont: 7.5 * d,
     breakdownFont: 6.5 * d,
     breakdownGroupLine: 3.5 * d,
@@ -201,6 +222,15 @@ function sectionTitle(doc, m, title, y, { note, color = COLOR.ink, size = m.sect
     doc.text(note, MARGIN + width + 3, y);
   }
   return y + 2;
+}
+
+// "Full Coverage" and "Essentials Only": a larger heading over a rule.
+function scopeHeading(doc, m, density, y, title, note) {
+  const end = sectionTitle(doc, m, title, y + 1 * density, { size: m.scopeFont, note });
+  doc.setDrawColor(...COLOR.rule);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN, end, PAGE_WIDTH - MARGIN, end);
+  return end + 6 * density;
 }
 
 function applianceTable(doc, m, { startY, rows, left, width, withTotalRow }) {
@@ -268,7 +298,7 @@ function condensedApplianceTable(doc, m, { startY, appliances, total }) {
 function draw(doc, data, { density, splitAppliances }) {
   const m = metricsFor(density);
   const pageHeight = doc.internal.pageSize.getHeight();
-  const { appliances, results, best, strategies, condensed, essentials } = data;
+  const { appliances, applianceCost, results, best, strategies, condensed, percentages, essentials } = data;
 
   // --- Header ---
   doc.setFillColor(...COLOR.banner);
@@ -277,7 +307,7 @@ function draw(doc, data, { density, splitAppliances }) {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(m.titleFont);
   doc.setFont('helvetica', 'bold');
-  doc.text('Warranty Protection Plan', MARGIN, m.headerHeight * 0.47);
+  doc.text('Appliance Protection Plans', MARGIN, m.headerHeight * 0.47);
 
   doc.setFontSize(m.subtitleFont);
   doc.setFont('helvetica', 'normal');
@@ -289,28 +319,21 @@ function draw(doc, data, { density, splitAppliances }) {
 
   let y = m.headerHeight + 8 * density;
 
-  // With an Essentials plan on the page, say plainly that this part covers
-  // everything, so it reads as the main recommendation.
+  // With an Essentials Only plan on the page, say plainly that this part
+  // covers everything, so it reads as the main recommendation.
   if (essentials) {
-    y = sectionTitle(doc, m, 'Full Coverage', y + 1 * density, {
-      size: m.scopeFont,
-      note: `All ${appliances.length} appliance${appliances.length === 1 ? '' : 's'} on this order`,
-    });
-    doc.setDrawColor(...COLOR.rule);
-    doc.setLineWidth(0.3);
-    doc.line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
-    y += 6 * density;
+    y = scopeHeading(doc, m, density, y, 'Full Coverage',
+      `All ${appliances.length} appliance${appliances.length === 1 ? '' : 's'} on this order`);
   }
 
   // --- Appliances covered ---
-  const totalCost = appliances.reduce((sum, a) => sum + a.cost, 0);
   y = sectionTitle(doc, m, 'Appliances Covered', y);
 
   if (condensed) {
-    y = condensedApplianceTable(doc, m, { startY: y, appliances, total: totalCost });
+    y = condensedApplianceTable(doc, m, { startY: y, appliances, total: applianceCost });
   } else {
     const rows = appliances.map((app, i) => [(i + 1).toString(), app.model, formatPrice(app.cost)]);
-    const total = ['', 'Total', formatPrice(totalCost)];
+    const total = ['', 'Total', formatPrice(applianceCost)];
 
     if (splitAppliances) {
       const gap = 4;
@@ -334,31 +357,62 @@ function draw(doc, data, { density, splitAppliances }) {
   // --- Pricing comparison: the options chosen in settings ---
   y = sectionTitle(doc, m, 'Pricing Comparison', y);
 
+  const optionRows = strategies.map((key) => [
+    STRATEGY_LABELS[key],
+    ...WARRANTY_YEARS.map((yr) => {
+      const r = results[yr]?.[key];
+      return r?.valid ? formatPrice(r.total) : '—';
+    }),
+  ]);
+
+  // Optional figures for the best option per term, under the options.
+  const figureRows = [];
+  if (percentages) {
+    const figures = WARRANTY_YEARS.map((yr) =>
+      figuresFor(results[yr]?.[best[yr]]?.total, applianceCost, results[yr]?.individual, yr));
+    figureRows.push(
+      ['% of appliance cost', ...figures.map((f) => (f ? formatPercent(f.share) : '—'))],
+      ['% per year', ...figures.map((f) => (f ? formatPercent(f.perYear) : '—'))],
+      ['Savings vs Individual', ...figures.map((f) => (f?.saving ? formatPrice(f.saving) : '—'))],
+    );
+  }
+
   y = table(doc, {
     startY: y,
-    head: [['Strategy', ...WARRANTY_YEARS.map((yr) => `${yr}-Year`)]],
-    body: strategies.map((key) => [
-      STRATEGY_LABELS[key],
-      ...WARRANTY_YEARS.map((yr) => {
-        const r = results[yr]?.[key];
-        return r?.valid ? formatPrice(r.total) : '—';
-      }),
-    ]),
+    head: [['Strategy', ...WARRANTY_YEARS.map(termLabel)]],
+    body: [...optionRows, ...figureRows],
     margin: { left: MARGIN, right: MARGIN },
     styles: { fontSize: m.comparisonFont, cellPadding: m.comparisonPadding, textColor: COLOR.ink },
     headStyles: { fillColor: COLOR.heading, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: m.comparisonFont },
     columnStyles: {
-      0: { cellWidth: 40, fontStyle: 'bold' },
+      0: { cellWidth: 40 },
       1: { halign: 'center' },
       2: { halign: 'center' },
       3: { halign: 'center' },
     },
     didParseCell: (cell) => {
-      if (cell.section !== 'body' || cell.column.index === 0) return;
-      const yr = WARRANTY_YEARS[cell.column.index - 1];
-      if (strategies[cell.row.index] === best[yr]) {
+      if (cell.section !== 'body') return;
+      const key = strategies[cell.row.index];
+
+      if (!key) {
+        // A figures row: quieter than the prices it describes.
+        cell.cell.styles.textColor = COLOR.muted;
+        cell.cell.styles.fontSize = m.comparisonFont * 0.88;
+        cell.cell.styles.cellPadding = m.comparisonPadding * 0.6;
+        cell.cell.styles.fillColor = [255, 255, 255];
+        return;
+      }
+
+      // Only the winning option is bold, so it stands out by weight as well
+      // as by colour.
+      if (cell.column.index === 0) {
+        cell.cell.styles.fontStyle = WARRANTY_YEARS.some((yr) => best[yr] === key) ? 'bold' : 'normal';
+        return;
+      }
+      if (best[WARRANTY_YEARS[cell.column.index - 1]] === key) {
         cell.cell.styles.textColor = COLOR.best;
         cell.cell.styles.fontStyle = 'bold';
+        cell.cell.styles.fillColor = COLOR.bestFill;
       }
     },
   });
@@ -383,12 +437,18 @@ function draw(doc, data, { density, splitAppliances }) {
     const x = MARGIN + col * (colWidth + 3);
     let cy = top;
 
+    // Two lines: the term and its price, then which option it is.
     doc.setFillColor(...COLOR.breakdownHead);
     doc.rect(x, cy, colWidth, m.breakdownHeadHeight, 'F');
     doc.setFontSize(m.breakdownHeadFont);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...COLOR.heading);
-    doc.text(`${yr}-Year: ${STRATEGY_LABELS[bestKey]} — ${formatPrice(option.total)}`, x + 2, cy + m.breakdownHeadHeight * 0.71);
+    doc.text(termLabel(yr), x + 2, cy + m.breakdownHeadHeight * 0.42);
+    doc.text(formatPrice(option.total), x + colWidth - 2, cy + m.breakdownHeadHeight * 0.42, { align: 'right' });
+    doc.setFontSize(m.breakdownFont);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLOR.muted);
+    doc.text(STRATEGY_LABELS[bestKey], x + 2, cy + m.breakdownHeadHeight * 0.8);
     cy += m.breakdownHeadHeight + 3.2 * density;
 
     doc.setFontSize(m.breakdownFont);
@@ -413,8 +473,8 @@ function draw(doc, data, { density, splitAppliances }) {
 
   y = bottom + m.sectionGap;
 
-  // --- Essentials: a lighter, secondary plan for the starred models ---
-  if (essentials) y = drawEssentials(doc, m, density, essentials, y);
+  // --- Essentials Only: a smaller plan for the starred models ---
+  if (essentials) y = drawEssentials(doc, m, density, essentials, y, percentages);
 
   // The last section's trailing gap isn't content.
   const contentBottom = y - m.sectionGap;
@@ -428,69 +488,125 @@ function draw(doc, data, { density, splitAppliances }) {
   return contentBottom;
 }
 
-/**
- * Essentials, drawn as an outlined panel rather than in solid tables so it
- * reads as the smaller alternative to full coverage. It lists the starred
- * models, then the best bundle for them per term — every plan in it, so a
- * bundle split into several plans shows as such.
- */
-function drawEssentials(doc, m, density, essentials, startY) {
-  const count = essentials.appliances.length;
-  let y = sectionTitle(doc, m, 'Essentials', startY, {
-    color: COLOR.essentials,
-    note: `A smaller plan covering only ${count === 1 ? 'the 1 selected appliance' : `the ${count} selected appliances`}`,
+// Lay out runs of text left to right, wrapping between items rather than
+// inside one, each run in its own colour and weight. Returns the baseline of
+// the last line.
+function flowText(doc, items, { x, y, width, size, lineGap, separator }) {
+  doc.setFontSize(size);
+  const runWidth = (run) => {
+    doc.setFont('helvetica', run.bold ? 'bold' : 'normal');
+    return doc.getTextWidth(run.text);
+  };
+  doc.setFont('helvetica', 'normal');
+  const sepWidth = doc.getTextWidth(separator);
+
+  let cx = x;
+  let cy = y;
+  items.forEach((runs, i) => {
+    const itemWidth = runs.reduce((w, run) => w + runWidth(run), 0);
+    if (i > 0) {
+      if (cx + sepWidth + itemWidth > x + width) {
+        cy += lineGap;
+        cx = x;
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...COLOR.faint);
+        doc.text(separator, cx, cy);
+        cx += sepWidth;
+      }
+    }
+    for (const run of runs) {
+      doc.setFont('helvetica', run.bold ? 'bold' : 'normal');
+      doc.setTextColor(...run.color);
+      doc.text(run.text, cx, cy);
+      cx += doc.getTextWidth(run.text);
+    }
   });
+  return cy;
+}
 
-  const pad = 3 * density;
-  const innerLeft = MARGIN + pad;
-  const innerWidth = CONTENT_WIDTH - pad * 2;
-  const boxTop = y + 1 * density;
-  let cy = boxTop + pad + lineHeight(m.tableFont) * 0.75;
+/**
+ * Essentials Only, laid out like Full Coverage's heading but without tables,
+ * so it reads as the smaller alternative. Its prices are in orange. It lists
+ * the starred models, then the best bundle for them per term — every plan in
+ * it, so a bundle split into several plans shows as such.
+ */
+function drawEssentials(doc, m, density, essentials, startY, percentages) {
+  const count = essentials.appliances.length;
+  let y = scopeHeading(doc, m, density, startY, 'Essentials Only',
+    `Covers only ${count === 1 ? 'the 1 selected appliance' : `the ${count} selected appliances`}`);
+  y += lineHeight(m.tableFont) * 0.35;
 
-  // Selected models, flowed as one line, with their total on the right.
-  const total = formatPrice(essentials.appliances.reduce((sum, a) => sum + a.cost, 0));
+  // The total, on the right of the first line.
   doc.setFontSize(m.tableFont);
   doc.setFont('helvetica', 'bold');
-  const totalLabel = `Total ${total}`;
-  const totalWidth = doc.getTextWidth(totalLabel);
-  doc.setTextColor(...COLOR.ink);
-  doc.text(totalLabel, innerLeft + innerWidth, cy, { align: 'right' });
-
+  const totalPrice = formatPrice(essentials.cost);
+  const totalPriceWidth = doc.getTextWidth(totalPrice);
+  doc.setTextColor(...COLOR.essentialsCost);
+  doc.text(totalPrice, PAGE_WIDTH - MARGIN, y, { align: 'right' });
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...COLOR.heading);
-  const modelLine = essentials.appliances.map((a) => `${a.model} ${formatPrice(a.cost)}`).join('   ·   ');
-  const modelLines = doc.splitTextToSize(modelLine, innerWidth - totalWidth - 6);
-  doc.text(modelLines, innerLeft, cy);
-  cy += lineHeight(m.tableFont) * (modelLines.length - 1) + 2.5 * density;
+  doc.setTextColor(...COLOR.ink);
+  doc.text('Total ', PAGE_WIDTH - MARGIN - totalPriceWidth, y, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  const totalWidth = doc.getTextWidth('Total ') + totalPriceWidth;
 
-  doc.setDrawColor(...COLOR.essentialsLine);
-  doc.setLineWidth(0.2);
-  doc.line(innerLeft, cy, innerLeft + innerWidth, cy);
-  cy += 3.5 * density + lineHeight(m.tableFont) * 0.6;
+  // The models, flowed across the rest of the line.
+  y = flowText(
+    doc,
+    essentials.appliances.map((a) => [
+      { text: `${a.model} `, color: COLOR.heading },
+      { text: formatPrice(a.cost), color: COLOR.essentialsCost, bold: true },
+    ]),
+    {
+      x: MARGIN,
+      y,
+      width: CONTENT_WIDTH - totalWidth - 6,
+      size: m.tableFont,
+      lineGap: lineHeight(m.tableFont),
+      separator: '   ·   ',
+    },
+  );
+  y += 4 * density + lineHeight(m.tableFont) * 0.6;
 
   // The best bundle per term, side by side.
-  const gap = 4;
-  const colWidth = (innerWidth - gap * 2) / 3;
-  const top = cy;
+  const gap = 5;
+  const colWidth = (CONTENT_WIDTH - gap * 2) / 3;
+  const top = y;
   let bottom = top;
 
   WARRANTY_YEARS.forEach((yr, col) => {
     const plan = essentials.plans[yr];
-    const x = innerLeft + col * (colWidth + gap);
+    const figures = essentials.figures[yr];
+    const x = MARGIN + col * (colWidth + gap);
     let ty = top;
 
     doc.setFontSize(m.tableFont);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...COLOR.ink);
-    doc.text(`${yr}-Year`, x, ty);
+    doc.text(termLabel(yr), x, ty);
+    doc.setTextColor(...COLOR.essentialsCost);
     doc.text(plan ? formatPrice(plan.total) : '—', x + colWidth, ty, { align: 'right' });
-    ty += lineHeight(m.tableFont) + 0.6 * density;
+    ty += lineHeight(m.tableFont) * 0.95;
+
+    if (percentages && figures) {
+      doc.setFontSize(m.breakdownFont);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...COLOR.muted);
+      doc.text(`${formatPercent(figures.share)} of cost · ${formatPercent(figures.perYear)} per year`, x, ty);
+      ty += lineHeight(m.breakdownFont);
+      if (figures.saving) {
+        doc.text(`Saves ${formatPrice(figures.saving)} vs Individual`, x, ty);
+        ty += lineHeight(m.breakdownFont);
+      }
+    }
+    ty += 0.8 * density;
 
     for (const item of plan?.items ?? []) {
       doc.setFontSize(m.breakdownFont);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...COLOR.heading);
       doc.text(item.groupLabel, x, ty);
+      doc.setTextColor(...COLOR.essentialsCost);
       doc.text(formatPrice(item.price), x + colWidth, ty, { align: 'right' });
       ty += lineHeight(m.breakdownFont);
 
@@ -503,10 +619,5 @@ function drawEssentials(doc, m, density, essentials, startY) {
     bottom = Math.max(bottom, ty);
   });
 
-  const boxBottom = bottom + pad * 0.6;
-  doc.setDrawColor(...COLOR.essentialsLine);
-  doc.setLineWidth(0.35);
-  doc.roundedRect(MARGIN, boxTop, CONTENT_WIDTH, boxBottom - boxTop, 1.5, 1.5, 'S');
-
-  return boxBottom + m.sectionGap;
+  return bottom + m.sectionGap;
 }

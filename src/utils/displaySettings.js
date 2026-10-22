@@ -56,6 +56,8 @@ export const DEFAULT_SETTINGS = {
   homeMode: 'advanced',
   pdfApplianceStyle: 'full',
   ...Object.fromEntries(PDF_COMPARE_OPTIONS.map((option) => [option.key, true])),
+  // % of appliance cost, % per year and savings against Individual on the PDF.
+  pdfPercentages: false,
 };
 
 const STORAGE_KEY = 'wlc-display-settings';

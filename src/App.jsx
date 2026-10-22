@@ -493,6 +493,7 @@ export default function App() {
                 allAppliances={appliances}
                 settings={settings}
                 essentialIds={essentialIds}
+                onToggleEssential={toggleEssential}
               />
             </div>
           </div>

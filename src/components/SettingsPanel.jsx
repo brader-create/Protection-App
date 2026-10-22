@@ -40,6 +40,27 @@ function Segmented({ label, options, value, onChange }) {
   );
 }
 
+function SwitchRow({ label, hint, on, onToggle }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={onToggle}
+      className="w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all hover:opacity-90"
+      style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)' }}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
+        <span className="block text-xs mt-0.5" style={{ color: 'var(--text-faint)' }}>{hint}</span>
+      </span>
+      <span className={`relative w-9 h-5 rounded-full shrink-0 transition-colors ${on ? 'bg-blue-600' : 'bg-slate-600'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+    </button>
+  );
+}
+
 export default function SettingsPanel({ settings, onChange, onReset, onClose, essentialCount = 0 }) {
   const comparedCount = PDF_COMPARE_OPTIONS.filter((option) => settings[option.key] !== false).length;
   const applianceStyle = PDF_APPLIANCE_STYLES.find((style) => style.key === settings.pdfApplianceStyle);
@@ -177,6 +198,13 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose, es
                   : 'None starred yet.'}
               </p>
             </div>
+
+            <SwitchRow
+              label="Percentages & savings"
+              hint="% of appliance cost, % per year, and savings against Individual"
+              on={settings.pdfPercentages === true}
+              onToggle={() => onChange('pdfPercentages', !settings.pdfPercentages)}
+            />
           </div>
         </div>
 
