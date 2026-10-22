@@ -264,6 +264,48 @@ function buildTurboResult(original, modified, maxDiscount, discountMap, calcResu
   };
 }
 
+// Simple mode's breakdown: one line per kind of plan, e.g. "3+ Appliances ·
+// 10 models  $1,499.98", rather than every appliance in every group. Hovering a
+// line lists its models.
+function CompactBreakdown({ items }) {
+  const rows = [];
+  for (const item of items) {
+    const error = item.price === null;
+    const label = error ? 'No Bracket' : item.groupLabel;
+    let row = rows.find((r) => r.label === label);
+    if (!row) {
+      row = { label, error, plans: 0, models: [], total: 0 };
+      rows.push(row);
+    }
+    row.plans += 1;
+    row.models.push(...item.appliances.map((a) => a.model));
+    row.total += item.price ?? 0;
+  }
+  rows.sort((a, b) => b.total - a.total);
+
+  return (
+    <div className="space-y-1.5">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center gap-2 text-xs" title={row.models.join(', ')}>
+          <span
+            className={row.error
+              ? 'text-[10px] font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded-full border border-red-500/20'
+              : 'badge-blue text-[10px]'}
+          >
+            {row.plans > 1 ? `${row.plans} × ` : ''}{row.label}
+          </span>
+          <span style={{ color: 'var(--text-faint)' }}>
+            {row.models.length} model{row.models.length === 1 ? '' : 's'}
+          </span>
+          <span className={`ml-auto tabular-nums font-semibold ${row.error ? 'text-red-400' : ''}`} style={!row.error ? { color: 'var(--text-primary)' } : {}}>
+            {row.error ? 'N/A' : formatPrice(row.total)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, visibility = {} }) {
   const show = (key) => visibility[key] !== false;
   const isBest = result.isCheapest && result.valid;
@@ -328,6 +370,7 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active, years,
             </p>
           )}
 
+          {show('compactBreakdown') && <CompactBreakdown items={result.items} />}
           <div className={`space-y-3 ${show('groupBreakdown') ? '' : 'hidden'}`}>
             {result.items.map((item, i) => {
               const isError = item.price === null;
@@ -544,6 +587,9 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
             </p>
           )}
 
+          {show('compactBreakdown') && (
+            <CompactBreakdown items={showingTurbo ? turboResult.turboItems : result.items} />
+          )}
           {/* Group breakdown — show turbo items if active, original items otherwise */}
           <div className={`space-y-3 ${show('groupBreakdown') ? '' : 'hidden'}`}>
             {(showingTurbo ? turboResult.turboItems : result.items).map((item, i) => {
@@ -1087,8 +1133,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
               <div>
                 <p className="text-sm font-semibold text-amber-300">Essentials ({activeYear}-Year)</p>
                 <p className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                  {essentials.appliances.length} starred model{essentials.appliances.length === 1 ? '' : 's'}
-                  {essentials.best ? ` — ${essentials.best.label}` : ''}
+                  {essentials.appliances.length} starred model{essentials.appliances.length === 1 ? '' : 's'} · best bundle
                 </p>
               </div>
             </div>
@@ -1096,6 +1141,12 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
               {essentials.total != null ? formatPrice(essentials.total) : 'No bracket'}
             </p>
           </div>
+
+          {essentials.best && show('compactBreakdown') && (
+            <div className="mt-3 pt-3 border-t border-amber-500/15">
+              <CompactBreakdown items={essentials.best.items} />
+            </div>
+          )}
 
           {essentials.best && show('groupBreakdown') && (
             <div className="mt-3 pt-3 border-t border-amber-500/15 space-y-2">

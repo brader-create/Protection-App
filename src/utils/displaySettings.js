@@ -1,54 +1,61 @@
 // What the home page and the PDF show.
 //
 // The home page has two modes rather than a switch per section: Simple keeps
-// to the answer — the lowest price, what it is as a share of the appliances,
-// and each option's total — and Advanced shows everything. The PDF keeps a
-// switch per section, which the settings show as a small page layout.
+// to the answer — the lowest price, its share of the appliance cost, and each
+// option's total with a short breakdown by plan type — and Advanced shows
+// everything. The PDF has a few choices of its own; Essentials is added to it
+// automatically whenever models are starred.
 
 export const HOME_MODES = [
   {
     key: 'simple',
     label: 'Simple',
     summary: 'Just the answer',
-    shows: 'Lowest price, % of cost, % per year, and each option’s total',
+    shows: 'Lowest price, % of cost, and each option’s total with a short breakdown. No Save 3%.',
   },
   {
     key: 'advanced',
     label: 'Advanced',
     summary: 'Everything',
-    shows: 'Adds groupings, Turbo Charge, deal ideas, the % bar and savings banners',
+    shows: 'Adds Save 3%, % per year, full groupings, Turbo Charge, deal ideas and banners',
   },
 ];
 
 // The parts of the results Simple leaves out. Everything else shows in both.
 const SIMPLE_HIDES = [
+  'percentPerYear',
   'percentMeter',
   'groupBreakdown',
   'turboCharge',
   'dealSuggestions',
+  'save3',
   'save3Banner',
   'deselectedModels',
 ];
 
 // Which parts of the results to show for a home mode, as { part: false } for
-// each hidden one.
+// each hidden one. Simple swaps the full groupings for a short breakdown.
 export function homeVisibility(mode) {
-  if (mode !== 'simple') return {};
+  if (mode !== 'simple') return { compactBreakdown: false };
   return Object.fromEntries(SIMPLE_HIDES.map((part) => [part, false]));
 }
 
-export const PDF_SECTIONS = [
-  { key: 'pdfDate', label: 'Date' },
-  { key: 'pdfApplianceList', label: 'Appliances covered' },
-  { key: 'pdfApplianceTotal', label: 'Total' },
-  { key: 'pdfComparisonTable', label: 'Pricing comparison' },
-  { key: 'pdfBreakdown', label: 'Best option breakdown' },
-  { key: 'pdfEssentials', label: 'Essentials', default: false },
+// Rows of the PDF's pricing comparison that can be left out.
+export const PDF_COMPARE_OPTIONS = [
+  { key: 'pdfCompareBestMix', strategy: 'bestMix', label: 'Best Mix' },
+  { key: 'pdfCompareSingleBundle', strategy: 'singleBundle', label: 'Single Bundle' },
+  { key: 'pdfCompareIndividual', strategy: 'individual', label: 'Individual' },
+];
+
+export const PDF_APPLIANCE_STYLES = [
+  { key: 'full', label: 'Full list', hint: 'One row per appliance' },
+  { key: 'condensed', label: 'Condensed', hint: 'Three across, takes a fraction of the space' },
 ];
 
 export const DEFAULT_SETTINGS = {
   homeMode: 'advanced',
-  ...Object.fromEntries(PDF_SECTIONS.map((section) => [section.key, section.default !== false])),
+  pdfApplianceStyle: 'full',
+  ...Object.fromEntries(PDF_COMPARE_OPTIONS.map((option) => [option.key, true])),
 };
 
 const STORAGE_KEY = 'wlc-display-settings';
@@ -64,6 +71,13 @@ export function loadSettings() {
     }
     if (!HOME_MODES.some((mode) => mode.key === settings.homeMode)) {
       settings.homeMode = DEFAULT_SETTINGS.homeMode;
+    }
+    if (!PDF_APPLIANCE_STYLES.some((style) => style.key === settings.pdfApplianceStyle)) {
+      settings.pdfApplianceStyle = DEFAULT_SETTINGS.pdfApplianceStyle;
+    }
+    // The comparison needs at least one row.
+    if (!PDF_COMPARE_OPTIONS.some((option) => settings[option.key])) {
+      for (const option of PDF_COMPARE_OPTIONS) settings[option.key] = true;
     }
     return settings;
   } catch {

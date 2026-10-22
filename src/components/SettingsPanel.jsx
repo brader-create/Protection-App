@@ -1,187 +1,49 @@
-import { HOME_MODES } from '../utils/displaySettings';
+import { HOME_MODES, PDF_APPLIANCE_STYLES, PDF_COMPARE_OPTIONS } from '../utils/displaySettings';
 
-// The mini page is paper in both themes, so it uses fixed colours rather than
-// the theme variables.
-const PAPER = {
-  ink: '#334155',
-  line: '#cbd5e1',
-  lineDark: '#94a3b8',
-  fill: '#f1f5f9',
-  amber: '#b45309',
-  amberFill: '#fef3c7',
-};
-
-function OnOffMark({ on }) {
-  return on ? (
-    <span className="ml-auto shrink-0 w-3.5 h-3.5 rounded-full bg-emerald-500 flex items-center justify-center">
-      <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" />
-      </svg>
-    </span>
-  ) : (
-    <span className="ml-auto shrink-0 text-[8px] font-bold uppercase tracking-wide" style={{ color: PAPER.lineDark }}>Off</span>
+function GroupHeading({ title, subtitle }) {
+  return (
+    <>
+      <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</p>
+      <p className="text-xs mt-0.5 mb-3" style={{ color: 'var(--text-faint)' }}>{subtitle}</p>
+    </>
   );
 }
 
-// One section of the mini page. On: drawn like the PDF section. Off: a dashed
-// placeholder, so it can be turned back on where it would sit.
-function Section({ on, label, name = label, onToggle, grow, accent, note, children }) {
+function FieldLabel({ children }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={on}
-      title={on ? `Hide ${name.toLowerCase()} on the PDF` : `Show ${name.toLowerCase()} on the PDF`}
-      className="w-full text-left rounded-[3px] px-1.5 py-1 flex flex-col gap-[3px] transition-all hover:ring-2 hover:ring-[#60a5fa99] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-      style={{
-        flexGrow: grow,
-        minHeight: 0,
-        border: on ? '1px solid transparent' : `1px dashed ${PAPER.lineDark}`,
-        background: on ? (accent ? PAPER.amberFill : PAPER.fill) : 'transparent',
-        opacity: on ? 1 : 0.55,
-      }}
-    >
-      <span className="flex items-center gap-1 text-[9px] font-semibold leading-none" style={{ color: accent ? PAPER.amber : PAPER.ink }}>
-        {label}
-        {note && <span className="font-normal" style={{ color: PAPER.lineDark }}>· {note}</span>}
-        <OnOffMark on={on} />
-      </span>
-      {on && <span className="flex-1 min-h-0 overflow-hidden flex flex-col gap-[3px]">{children}</span>}
-    </button>
+    <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-muted)' }}>{children}</p>
   );
 }
 
-const Bar = ({ w = '100%', h = 3, color = PAPER.line }) => (
-  <span className="block rounded-sm shrink-0" style={{ width: w, height: h, background: color }} />
-);
-
-function PdfLayoutPreview({ settings, onChange, essentialCount }) {
-  const on = (key) => settings[key] !== false;
-  const flip = (key) => () => onChange(key, !on(key));
-
-  const essentialsNote = !on('pdfEssentials')
-    ? null
-    : essentialCount > 0
-      ? `${essentialCount} starred`
-      : 'star models to fill';
-
+// A row of buttons where exactly one is chosen.
+function Segmented({ label, options, value, onChange }) {
   return (
-    <div
-      className="mx-auto w-full max-w-[230px] bg-white rounded-sm shadow-xl flex flex-col"
-      style={{ aspectRatio: '210 / 297', boxShadow: '0 10px 30px rgba(2,6,23,0.35)' }}
-    >
-      {/* Header band, with the date as its own switch */}
-      <div className="shrink-0 flex items-end justify-between px-[7%] pb-2 pt-3" style={{ background: '#0f172a', height: '13%' }}>
-        <span className="flex flex-col gap-1">
-          <Bar w={64} h={5} color="#e2e8f0" />
-          <Bar w={38} h={3} color="#64748b" />
-        </span>
-        <button
-          type="button"
-          onClick={flip('pdfDate')}
-          aria-pressed={on('pdfDate')}
-          title={on('pdfDate') ? 'Hide the date on the PDF' : 'Show the date on the PDF'}
-          className="text-[8px] font-semibold leading-none px-1.5 py-1 rounded-sm transition-all hover:ring-2 hover:ring-[#60a5fab3]"
-          style={{
-            color: on('pdfDate') ? '#cbd5e1' : '#475569',
-            border: on('pdfDate') ? '1px solid #334155' : '1px dashed #475569',
-            textDecoration: on('pdfDate') ? 'none' : 'line-through',
-          }}
-        >
-          Date
-        </button>
-      </div>
-
-      <div className="flex-1 min-h-0 flex flex-col gap-[5px] px-[7%] pt-[5%] pb-[3%]">
-        {/* Appliances covered, with its total row as a separate switch */}
-        <div className="flex flex-col gap-[2px]" style={{ flexGrow: 3, minHeight: 0 }}>
-          <Section on={on('pdfApplianceList')} label="Appliances" onToggle={flip('pdfApplianceList')} grow={1}>
-            <Bar h={4} color={PAPER.ink} />
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span key={i} className="flex justify-between gap-2">
-                <Bar w="55%" />
-                <Bar w="18%" color={PAPER.lineDark} />
-              </span>
-            ))}
-          </Section>
+    <div role="radiogroup" aria-label={label} className="grid grid-cols-2 gap-1 rounded-xl p-1" style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)' }}>
+      {options.map((option) => {
+        const selected = value === option.key;
+        return (
           <button
+            key={option.key}
             type="button"
-            onClick={flip('pdfApplianceTotal')}
-            aria-pressed={on('pdfApplianceTotal')}
-            title={on('pdfApplianceTotal') ? 'Hide total rows on the PDF' : 'Show total rows on the PDF'}
-            className="shrink-0 flex items-center gap-1 px-1.5 py-[3px] rounded-[3px] text-[8px] font-semibold leading-none transition-all hover:ring-2 hover:ring-[#60a5fa99]"
-            style={{
-              color: PAPER.ink,
-              background: on('pdfApplianceTotal') ? '#e2e8f0' : 'transparent',
-              border: on('pdfApplianceTotal') ? '1px solid transparent' : `1px dashed ${PAPER.lineDark}`,
-              opacity: on('pdfApplianceTotal') ? 1 : 0.55,
-            }}
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(option.key)}
+            title={option.hint}
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-all ${selected ? 'bg-blue-600 text-white shadow' : 'hover:opacity-80'}`}
+            style={!selected ? { color: 'var(--text-muted)' } : {}}
           >
-            Total row
-            <OnOffMark on={on('pdfApplianceTotal')} />
+            {option.label}
           </button>
-        </div>
-
-        <Section on={on('pdfComparisonTable')} label="Pricing comparison" onToggle={flip('pdfComparisonTable')} grow={1.6}>
-          <Bar h={4} color={PAPER.ink} />
-          {[0, 1, 2].map((i) => (
-            <span key={i} className="flex gap-1.5">
-              <Bar w="28%" color={PAPER.lineDark} />
-              <Bar w="20%" color={i === 0 ? '#10b981' : PAPER.line} />
-              <Bar w="20%" color={i === 0 ? '#10b981' : PAPER.line} />
-              <Bar w="20%" color={i === 0 ? '#10b981' : PAPER.line} />
-            </span>
-          ))}
-        </Section>
-
-        <Section on={on('pdfBreakdown')} label="Best option breakdown" onToggle={flip('pdfBreakdown')} grow={2}>
-          <span className="flex gap-1 flex-1 min-h-0">
-            {[0, 1, 2].map((col) => (
-              <span key={col} className="flex-1 flex flex-col gap-[3px]">
-                <Bar h={4} color="#e2e8f0" />
-                <Bar w="80%" color={PAPER.lineDark} />
-                <Bar w="60%" />
-                <Bar w="70%" />
-                <Bar w="55%" />
-              </span>
-            ))}
-          </span>
-        </Section>
-
-        <Section
-          on={on('pdfEssentials')}
-          label="★ Essentials"
-          name="Essentials"
-          note={essentialsNote}
-          accent
-          onToggle={flip('pdfEssentials')}
-          grow={1.7}
-        >
-          <span className="flex gap-1.5 flex-1 min-h-0">
-            <span className="flex flex-col gap-[3px]" style={{ width: '58%' }}>
-              <Bar h={4} color={PAPER.amber} />
-              <Bar w="80%" color="#fcd34d" />
-              <Bar w="65%" color="#fcd34d" />
-            </span>
-            <span className="flex flex-col gap-[3px] flex-1">
-              <Bar h={4} color={PAPER.amber} />
-              <Bar color="#fcd34d" />
-              <Bar color="#fcd34d" />
-              <Bar color="#fcd34d" />
-            </span>
-          </span>
-        </Section>
-      </div>
-
-      {/* Footer line */}
-      <div className="shrink-0 flex justify-center pb-[4%]">
-        <Bar w="45%" h={2} color={PAPER.line} />
-      </div>
+        );
+      })}
     </div>
   );
 }
 
 export default function SettingsPanel({ settings, onChange, onReset, onClose, essentialCount = 0 }) {
+  const comparedCount = PDF_COMPARE_OPTIONS.filter((option) => settings[option.key] !== false).length;
+  const applianceStyle = PDF_APPLIANCE_STYLES.find((style) => style.key === settings.pdfApplianceStyle);
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8 overflow-y-auto backdrop-blur-sm"
@@ -217,8 +79,7 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose, es
         <div className="px-5 py-5 grid gap-8 sm:grid-cols-2">
           {/* Home page: one choice, Simple or Advanced */}
           <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Home page</p>
-            <p className="text-xs mt-0.5 mb-3" style={{ color: 'var(--text-faint)' }}>How much the results show</p>
+            <GroupHeading title="Home page" subtitle="How much the results show" />
 
             <div role="radiogroup" aria-label="Home page detail" className="space-y-2">
               {HOME_MODES.map((mode) => {
@@ -253,17 +114,69 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose, es
             </div>
           </div>
 
-          {/* PDF: the page itself, each section a switch */}
-          <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>PDF download</p>
-            <p className="text-xs mt-0.5 mb-3" style={{ color: 'var(--text-faint)' }}>Tap a section to turn it on or off</p>
-            <PdfLayoutPreview settings={settings} onChange={onChange} essentialCount={essentialCount} />
-            <p className="text-[11px] text-center mt-3 flex items-center justify-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          {/* PDF download */}
+          <div className="space-y-5">
+            <div>
+              <GroupHeading title="PDF download" subtitle="Always fits on one page" />
+
+              <FieldLabel>Appliances covered</FieldLabel>
+              <Segmented
+                label="Appliances covered"
+                options={PDF_APPLIANCE_STYLES}
+                value={settings.pdfApplianceStyle}
+                onChange={(value) => onChange('pdfApplianceStyle', value)}
+              />
+              {applianceStyle && (
+                <p className="text-xs mt-1.5" style={{ color: 'var(--text-faint)' }}>{applianceStyle.hint}</p>
+              )}
+            </div>
+
+            <div>
+              <FieldLabel>Options to compare</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {PDF_COMPARE_OPTIONS.map((option) => {
+                  const on = settings[option.key] !== false;
+                  // Keep at least one option in the comparison.
+                  const locked = on && comparedCount === 1;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={locked}
+                      onClick={() => onChange(option.key, !on)}
+                      title={locked ? 'At least one option stays in the comparison' : on ? `Leave ${option.label} off the PDF` : `Show ${option.label} on the PDF`}
+                      className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm border transition-all ${
+                        on ? 'border-blue-500/60 bg-blue-500/15 text-blue-300' : 'hover:opacity-80'
+                      } ${locked ? 'cursor-not-allowed' : ''}`}
+                      style={!on ? { borderColor: 'var(--border-main)', color: 'var(--text-muted)' } : {}}
+                    >
+                      <span className={`w-3.5 h-3.5 rounded flex items-center justify-center ${on ? 'bg-blue-500' : 'border border-slate-500'}`}>
+                        {on && (
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 rounded-xl p-3" style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)' }}>
+              <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
               </svg>
-              Always fits on one page
-            </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Essentials</span> is added to the PDF
+                automatically when you star models.{' '}
+                {essentialCount > 0
+                  ? `${essentialCount}\u00a0starred now.`
+                  : 'None starred yet.'}
+              </p>
+            </div>
           </div>
         </div>
 
