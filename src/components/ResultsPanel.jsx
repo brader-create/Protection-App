@@ -264,6 +264,38 @@ function buildTurboResult(original, modified, maxDiscount, discountMap, calcResu
   };
 }
 
+// A bracket bound: whole dollars without cents, e.g. "$3,500 – $4,999.99".
+function formatBound(value) {
+  return Number.isInteger(value) ? '$' + value.toLocaleString('en-US') : formatPrice(value);
+}
+
+// How full a plan's price bracket is, and how much more appliance cost it can
+// take before the price steps up.
+function BracketRoom({ item }) {
+  if (item.price === null || !item.bracket) return null;
+  const { min, max } = item.bracket;
+  const span = max - min;
+  const fill = span > 0 ? Math.min(1, Math.max(0, (item.totalCost - min) / span)) : 1;
+  const room = Math.max(0, max - item.totalCost);
+
+  return (
+    <div className="mt-1.5 pl-2">
+      <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-card)' }}>
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-500"
+          style={{ width: `${fill * 100}%` }}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[10px] mt-1 tabular-nums">
+        <span style={{ color: 'var(--text-faint)' }}>
+          {formatPrice(item.totalCost)} of {formatBound(min)} – {formatBound(max)}
+        </span>
+        <span className="text-amber-300 font-semibold shrink-0">{formatPrice(room)} room left</span>
+      </div>
+    </div>
+  );
+}
+
 // Simple mode's breakdown: one line per kind of plan, e.g. "3+ Appliances ·
 // 10 models  $1,499.98", rather than every appliance in every group. Hovering a
 // line lists its models.
@@ -755,7 +787,7 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
   );
 }
 
-export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances, settings = {}, essentialIds }) {
+export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances, settings = {}, essentialIds, onToggleEssential }) {
   const visibility = homeVisibility(settings.homeMode);
   const show = (key) => visibility[key] !== false;
   const visibleCards = ['bestMixCard', 'singleBundleCard', 'individualCard'].filter(show).length;
@@ -771,6 +803,29 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
       .find((r) => r?.valid && r.total === result.cheapestPrice);
     return { appliances: starred, result, best, total: result.cheapestPrice };
   }, [essentialIds, appliances, activeYear]);
+
+  // Advanced only: the unstarred models that could join Essentials at no extra
+  // cost. Bracket room alone can't answer this — adding to a 1- or 2-appliance
+  // plan moves it to another price table — so each is priced for real. That
+  // gets slow past a handful of models, hence the limit.
+  const MAX_STARRED_TO_CHECK = 8;
+  const checkAdditions = show('groupBreakdown');
+  const essentialsAdditions = useMemo(() => {
+    if (!checkAdditions || !essentials?.best || essentials.total == null) return null;
+    const others = appliances.filter((a) => !essentialIds.has(a.id));
+    if (others.length === 0) return null;
+    if (essentials.appliances.length > MAX_STARRED_TO_CHECK) return { tooMany: true, fits: [] };
+
+    const fits = [];
+    for (const app of others) {
+      const priced = calculateAll([...essentials.appliances, app], activeYear);
+      if (priced?.cheapestPrice != null && priced.cheapestPrice <= essentials.total + 0.005) {
+        fits.push({ app, change: priced.cheapestPrice - essentials.total });
+      }
+    }
+    fits.sort((a, b) => b.app.cost - a.app.cost);
+    return { tooMany: false, fits };
+  }, [checkAdditions, essentials, appliances, essentialIds, activeYear]);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThresholds, setShowThresholds] = useState(false);
@@ -1164,8 +1219,43 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
                       </div>
                     ))}
                   </div>
+                  <BracketRoom item={item} />
                 </div>
               ))}
+
+              {essentialsAdditions && (
+                <div className="pt-3 mt-1 border-t border-amber-500/15">
+                  <p className="text-[11px] font-semibold text-amber-300 mb-1.5">Add at no extra cost</p>
+                  {essentialsAdditions.tooMany ? (
+                    <p className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+                      Star {MAX_STARRED_TO_CHECK} or fewer models to check which others fit.
+                    </p>
+                  ) : essentialsAdditions.fits.length === 0 ? (
+                    <p className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+                      Nothing else on this order fits without raising the price.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {essentialsAdditions.fits.map(({ app, change }) => (
+                        <button
+                          key={app.id}
+                          type="button"
+                          onClick={() => onToggleEssential?.(app.id)}
+                          title={`Star ${app.model} — Essentials stays ${formatPrice(essentials.total + change)}`}
+                          className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 text-[11px] text-amber-200 transition-colors"
+                        >
+                          <span className="font-bold">+</span>
+                          <span>{app.model}</span>
+                          <span className="tabular-nums opacity-70">{formatPrice(app.cost)}</span>
+                          {change < -0.005 && (
+                            <span className="text-emerald-300 font-semibold">saves {formatPrice(-change)}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
