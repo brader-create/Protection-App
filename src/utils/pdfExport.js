@@ -38,9 +38,9 @@ const COLOR = {
   totalRow: [241, 245, 249],
   breakdownHead: [226, 232, 240],
   best: [5, 150, 105],
-  bestFill: [236, 253, 245],
-  // Essentials Only marks its prices in orange, and nothing else.
-  essentialsCost: [234, 88, 12],
+  // Essentials Only: its title and its plan total per term, and nothing else.
+  // A true orange — the brighter orange-red read as red.
+  orange: [204, 102, 0],
 };
 
 // The terms are years added on top of the manufacturer's warranty.
@@ -404,7 +404,7 @@ function draw(doc, data, { density, splitAppliances }) {
       }
 
       // Only the winning option is bold, so it stands out by weight as well
-      // as by colour.
+      // as by colour; its prices are also a size up.
       if (cell.column.index === 0) {
         cell.cell.styles.fontStyle = WARRANTY_YEARS.some((yr) => best[yr] === key) ? 'bold' : 'normal';
         return;
@@ -412,7 +412,7 @@ function draw(doc, data, { density, splitAppliances }) {
       if (best[WARRANTY_YEARS[cell.column.index - 1]] === key) {
         cell.cell.styles.textColor = COLOR.best;
         cell.cell.styles.fontStyle = 'bold';
-        cell.cell.styles.fillColor = COLOR.bestFill;
+        cell.cell.styles.fontSize = m.comparisonFont * 1.2;
       }
     },
   });
@@ -526,23 +526,30 @@ function flowText(doc, items, { x, y, width, size, lineGap, separator }) {
 }
 
 /**
- * Essentials Only, laid out like Full Coverage's heading but without tables,
- * so it reads as the smaller alternative. Its prices are in orange. It lists
- * the starred models, then the best bundle for them per term — every plan in
- * it, so a bundle split into several plans shows as such.
+ * Essentials Only, without tables and under a smaller heading than Full
+ * Coverage, so it reads as the lesser alternative. Orange marks only its
+ * title and its plan total per term. It lists the starred models, then the
+ * best bundle for them per term — every plan in it, so a bundle split into
+ * several plans shows as such.
  */
 function drawEssentials(doc, m, density, essentials, startY, percentages) {
   const count = essentials.appliances.length;
-  let y = scopeHeading(doc, m, density, startY, 'Essentials Only',
-    `Covers only ${count === 1 ? 'the 1 selected appliance' : `the ${count} selected appliances`}`);
-  y += lineHeight(m.tableFont) * 0.35;
+  let y = sectionTitle(doc, m, 'Essentials Only', startY, {
+    color: COLOR.orange,
+    size: Math.max(7, 10 * density),
+    note: `Covers only ${count === 1 ? 'the 1 selected appliance' : `the ${count} selected appliances`}`,
+  });
+  doc.setDrawColor(...COLOR.rule);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
+  y += 5 * density + lineHeight(m.tableFont) * 0.35;
 
   // The total, on the right of the first line.
   doc.setFontSize(m.tableFont);
   doc.setFont('helvetica', 'bold');
   const totalPrice = formatPrice(essentials.cost);
   const totalPriceWidth = doc.getTextWidth(totalPrice);
-  doc.setTextColor(...COLOR.essentialsCost);
+  doc.setTextColor(...COLOR.ink);
   doc.text(totalPrice, PAGE_WIDTH - MARGIN, y, { align: 'right' });
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...COLOR.ink);
@@ -555,7 +562,7 @@ function drawEssentials(doc, m, density, essentials, startY, percentages) {
     doc,
     essentials.appliances.map((a) => [
       { text: `${a.model} `, color: COLOR.heading },
-      { text: formatPrice(a.cost), color: COLOR.essentialsCost, bold: true },
+      { text: formatPrice(a.cost), color: COLOR.ink, bold: true },
     ]),
     {
       x: MARGIN,
@@ -584,7 +591,7 @@ function drawEssentials(doc, m, density, essentials, startY, percentages) {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...COLOR.ink);
     doc.text(termLabel(yr), x, ty);
-    doc.setTextColor(...COLOR.essentialsCost);
+    doc.setTextColor(...COLOR.orange);
     doc.text(plan ? formatPrice(plan.total) : '—', x + colWidth, ty, { align: 'right' });
     ty += lineHeight(m.tableFont) * 0.95;
 
@@ -606,7 +613,6 @@ function drawEssentials(doc, m, density, essentials, startY, percentages) {
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...COLOR.heading);
       doc.text(item.groupLabel, x, ty);
-      doc.setTextColor(...COLOR.essentialsCost);
       doc.text(formatPrice(item.price), x + colWidth, ty, { align: 'right' });
       ty += lineHeight(m.breakdownFont);
 

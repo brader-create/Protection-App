@@ -296,6 +296,42 @@ function BracketRoom({ item }) {
   );
 }
 
+// For Individual, where every plan covers one appliance: one line each with
+// the model, its cost and its protection price, rather than a box per plan
+// repeating "1 Appliance" and its bracket.
+function ItemizedBreakdown({ items }) {
+  const rows = items.flatMap((item) => item.appliances.map((app) => ({ app, item })));
+  return (
+    <div>
+      <div
+        className="flex items-center text-[10px] font-semibold uppercase tracking-wide pb-1 mb-1 border-b"
+        style={{ color: 'var(--text-faint)', borderColor: 'var(--border-light)' }}
+      >
+        <span className="flex-1">Model</span>
+        <span className="w-20 text-right">Cost</span>
+        <span className="w-20 text-right">Protection</span>
+      </div>
+      <div className="space-y-0.5">
+        {rows.map(({ app, item }) => {
+          const isError = item.price === null;
+          return (
+            <div key={app.id} className="flex items-center text-xs tabular-nums" title={isError ? item.error : undefined}>
+              <span className="flex-1 truncate mr-2" style={{ color: 'var(--text-muted)' }}>{app.model}</span>
+              <span className="w-20 text-right" style={{ color: 'var(--text-faint)' }}>{formatPrice(app.cost)}</span>
+              <span
+                className={`w-20 text-right font-semibold ${isError ? 'text-red-400' : ''}`}
+                style={!isError ? { color: 'var(--text-primary)' } : {}}
+              >
+                {isError ? 'N/A' : formatPrice(item.price)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Simple mode's breakdown: one line per kind of plan, e.g. "3+ Appliances ·
 // 10 models  $1,499.98", rather than every appliance in every group. Hovering a
 // line lists its models.
@@ -338,7 +374,7 @@ function CompactBreakdown({ items }) {
   );
 }
 
-function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, visibility = {} }) {
+function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, visibility = {}, itemized = false }) {
   const show = (key) => visibility[key] !== false;
   const isBest = result.isCheapest && result.valid;
   const hasValidItems = result.items && result.items.some(i => i.price !== null);
@@ -403,7 +439,8 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active, years,
           )}
 
           {show('compactBreakdown') && <CompactBreakdown items={result.items} />}
-          <div className={`space-y-3 ${show('groupBreakdown') ? '' : 'hidden'}`}>
+          {itemized && show('groupBreakdown') && <ItemizedBreakdown items={result.items} />}
+          <div className={`space-y-3 ${show('groupBreakdown') && !itemized ? '' : 'hidden'}`}>
             {result.items.map((item, i) => {
               const isError = item.price === null;
               return (
@@ -863,6 +900,11 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
   const warrantyPct = totalApplianceCost > 0 && cheapestPrice !== null
     ? ((cheapestPrice / totalApplianceCost) * 100).toFixed(1)
     : null;
+  // Essentials as a share of the starred models' own cost.
+  const essentialsCost = essentials ? essentials.appliances.reduce((s, a) => s + a.cost, 0) : 0;
+  const essentialsPct = essentials?.total != null && essentialsCost > 0
+    ? ((essentials.total / essentialsCost) * 100).toFixed(1)
+    : null;
   // The same figure spread over the term, e.g. a 3-year plan at 9.6% is 3.2%/yr.
   const warrantyPctPerYear = warrantyPct !== null && activeYear > 0
     ? (parseFloat(warrantyPct) / activeYear).toFixed(1)
@@ -1173,6 +1215,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
             years={activeYear}
             showThresholds={false}
             visibility={visibility}
+            itemized
           />
         )}
       </div>
@@ -1192,9 +1235,19 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
                 </p>
               </div>
             </div>
-            <p className="text-2xl font-bold text-amber-400 tabular-nums">
-              {essentials.total != null ? formatPrice(essentials.total) : 'No bracket'}
-            </p>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-amber-400 tabular-nums">
+                {essentials.total != null ? formatPrice(essentials.total) : 'No bracket'}
+              </p>
+              {essentialsPct !== null && (show('percentOfCost') || show('percentPerYear')) && (
+                <p className="text-xs font-semibold text-amber-300/60 tabular-nums">
+                  {[
+                    show('percentOfCost') && `${essentialsPct}% of cost`,
+                    show('percentPerYear') && `${(parseFloat(essentialsPct) / activeYear).toFixed(1)}% per year`,
+                  ].filter(Boolean).join(' · ')}
+                </p>
+              )}
+            </div>
           </div>
 
           {essentials.best && show('compactBreakdown') && (
