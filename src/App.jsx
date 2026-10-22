@@ -45,9 +45,27 @@ export default function App() {
     saveSettings(settings);
   }, [settings]);
 
-  const updateSetting = useCallback((key, value) => {
+  function updateSetting(key, value) {
     setSettings((prev) => ({ ...prev, [key]: value }));
-  }, []);
+    // Simple hides the Save 3% switch, so it can't be left on out of sight.
+    if (key === 'homeMode' && value === 'simple' && save3Active) turnOffSave3();
+  }
+
+  function turnOffSave3() {
+    setSave3Active(false);
+    setSave3Exclusions(new Set());
+    ++pregenIdRef.current;
+    setPrecomputing(false);
+
+    if (calculating) {
+      // A calculation with 3% on is in progress: start it again without.
+      runProgressiveCalc({ forSave3: false });
+    } else if (Object.keys(normalByYear).length === 0 && Object.keys(save3OrigByYear).length > 0) {
+      // Results calculated with 3% on also hold the undiscounted figures; show
+      // those rather than leaving the results blank until the next Calculate.
+      setNormalByYear(save3OrigByYear);
+    }
+  }
 
   const resetSettings = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), []);
 
@@ -415,6 +433,7 @@ export default function App() {
 
         {/* Save 3% + Calculate */}
         <div className="flex flex-col items-center gap-4">
+          {settings.homeMode !== 'simple' && (
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2.5 cursor-pointer select-none rounded-xl px-5 py-2.5 hover:opacity-80 transition-all" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-main)' }}>
               <input
@@ -436,6 +455,7 @@ export default function App() {
               )}
             </label>
           </div>
+          )}
 
           <button
             onClick={handleCalculate}
