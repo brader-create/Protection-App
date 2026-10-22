@@ -1,45 +1,71 @@
-// Which parts of the results and the PDF are shown. Everything defaults to
-// visible except the Essentials section on the PDF, which is opt-in.
+// What the home page and the PDF show.
+//
+// The home page has two modes rather than a switch per section: Simple keeps
+// to the answer — the lowest price, what it is as a share of the appliances,
+// and each option's total — and Advanced shows everything. The PDF keeps a
+// switch per section, which the settings show as a small page layout.
 
-export const MAIN_PAGE_SECTIONS = [
-  { key: 'bestPriceBanner', label: 'Lowest available price', hint: 'The green banner at the top of the results' },
-  { key: 'percentOfCost', label: 'Percent of appliance cost', hint: 'Shown beside the lowest price' },
-  { key: 'percentPerYear', label: 'Percent per year', hint: 'The same figure divided by the term' },
-  { key: 'percentMeter', label: 'Percent bar', hint: 'The bar under the lowest price' },
-  { key: 'bestMixCard', label: 'Best Mix option' },
-  { key: 'singleBundleCard', label: 'Single Bundle option' },
-  { key: 'individualCard', label: 'Individual option' },
-  { key: 'groupBreakdown', label: 'Group breakdown', hint: 'The appliance lists inside each option' },
-  { key: 'essentialsCard', label: 'Essentials recommendation', hint: 'Best bundle for the models you star' },
-  { key: 'turboCharge', label: 'Turbo Charge', hint: 'The button and its savings banner' },
-  { key: 'dealSuggestions', label: 'Next deal suggestions' },
-  { key: 'save3Banner', label: 'Save 3% banner' },
-  { key: 'deselectedModels', label: 'Deselected models list' },
+export const HOME_MODES = [
+  {
+    key: 'simple',
+    label: 'Simple',
+    summary: 'Just the answer',
+    shows: 'Lowest price, % of cost, % per year, and each option’s total',
+  },
+  {
+    key: 'advanced',
+    label: 'Advanced',
+    summary: 'Everything',
+    shows: 'Adds groupings, Turbo Charge, deal ideas, the % bar and savings banners',
+  },
 ];
+
+// The parts of the results Simple leaves out. Everything else shows in both.
+const SIMPLE_HIDES = [
+  'percentMeter',
+  'groupBreakdown',
+  'turboCharge',
+  'dealSuggestions',
+  'save3Banner',
+  'deselectedModels',
+];
+
+// Which parts of the results to show for a home mode, as { part: false } for
+// each hidden one.
+export function homeVisibility(mode) {
+  if (mode !== 'simple') return {};
+  return Object.fromEntries(SIMPLE_HIDES.map((part) => [part, false]));
+}
 
 export const PDF_SECTIONS = [
-  { key: 'pdfApplianceList', label: 'Appliances covered', hint: 'The table of models and costs' },
-  { key: 'pdfComparisonTable', label: 'Pricing comparison', hint: 'Each option across 2, 3 and 4 years' },
-  { key: 'pdfBreakdown', label: 'Best option breakdown', hint: 'The three columns of groupings' },
-  { key: 'pdfEssentials', label: 'Essentials recommendation', hint: 'Off by default', default: false },
-  { key: 'pdfApplianceTotal', label: 'Appliance cost total' },
-  { key: 'pdfDate', label: 'Date in the header' },
+  { key: 'pdfDate', label: 'Date' },
+  { key: 'pdfApplianceList', label: 'Appliances covered' },
+  { key: 'pdfApplianceTotal', label: 'Total' },
+  { key: 'pdfComparisonTable', label: 'Pricing comparison' },
+  { key: 'pdfBreakdown', label: 'Best option breakdown' },
+  { key: 'pdfEssentials', label: 'Essentials', default: false },
 ];
 
-export const ALL_SECTIONS = [...MAIN_PAGE_SECTIONS, ...PDF_SECTIONS];
-
-export const DEFAULT_SETTINGS = Object.fromEntries(
-  ALL_SECTIONS.map((section) => [section.key, section.default !== false]),
-);
+export const DEFAULT_SETTINGS = {
+  homeMode: 'advanced',
+  ...Object.fromEntries(PDF_SECTIONS.map((section) => [section.key, section.default !== false])),
+};
 
 const STORAGE_KEY = 'wlc-display-settings';
 
 export function loadSettings() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return { ...DEFAULT_SETTINGS };
-    // Merge over the defaults so a setting added later is on rather than missing.
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    // Keep only settings that still exist, over the defaults, so a setting
+    // added later arrives at its default and a retired one is dropped.
+    const settings = { ...DEFAULT_SETTINGS };
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      if (key in stored) settings[key] = stored[key];
+    }
+    if (!HOME_MODES.some((mode) => mode.key === settings.homeMode)) {
+      settings.homeMode = DEFAULT_SETTINGS.homeMode;
+    }
+    return settings;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

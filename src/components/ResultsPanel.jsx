@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { WARRANTY_YEARS, lookupPrice, GROUP_TYPES, getBracket, PRICING } from '../data/warrantyPricing';
 import { generateComparisonPDF } from '../utils/pdfExport';
 import { analyzeBracketProximity, calculateAll, calculateIndividual } from '../utils/calculator';
+import { homeVisibility } from '../utils/displaySettings';
 
 function formatPrice(price) {
   if (price === null || price === undefined) return '—';
@@ -263,8 +264,8 @@ function buildTurboResult(original, modified, maxDiscount, discountMap, calcResu
   };
 }
 
-function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, settings = {} }) {
-  const show = (key) => settings[key] !== false;
+function ResultCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, visibility = {} }) {
+  const show = (key) => visibility[key] !== false;
   const isBest = result.isCheapest && result.valid;
   const hasValidItems = result.items && result.items.some(i => i.price !== null);
   const hasErrors = result.items && result.items.some(i => i.error);
@@ -396,8 +397,8 @@ function ResultCard({ result, cheapestPrice, originalResult, save3Active, years,
 }
 
 /** Best Mix card with integrated Turbo Charge */
-function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, appliances, onTurboResult, settings = {} }) {
-  const show = (key) => settings[key] !== false;
+function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years, showThresholds, appliances, onTurboResult, visibility = {} }) {
+  const show = (key) => visibility[key] !== false;
   const [turboActive, setTurboActive] = useState(false);
   const [turboLoading, setTurboLoading] = useState(false);
   const [turboResult, setTurboResult] = useState(null);
@@ -709,7 +710,8 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
 }
 
 export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances, settings = {}, essentialIds }) {
-  const show = (key) => settings[key] !== false;
+  const visibility = homeVisibility(settings.homeMode);
+  const show = (key) => visibility[key] !== false;
   const visibleCards = ['bestMixCard', 'singleBundleCard', 'individualCard'].filter(show).length;
   // Essentials: the best bundle for just the starred models, as a smaller
   // recommendation when a client doesn't want to cover everything.
@@ -1047,7 +1049,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
             showThresholds={showThresholds}
             appliances={appliances}
             onTurboResult={setTurboSavings}
-            settings={settings}
+            visibility={visibility}
           />
         )}
         {show('singleBundleCard') && (
@@ -1058,7 +1060,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
             save3Active={save3Active}
             years={activeYear}
             showThresholds={false}
-            settings={settings}
+            visibility={visibility}
           />
         )}
         {show('individualCard') && (
@@ -1069,7 +1071,7 @@ export default function ResultsPanel({ allResults, activeYear, onYearChange, app
             save3Active={save3Active}
             years={activeYear}
             showThresholds={false}
-            settings={settings}
+            visibility={visibility}
           />
         )}
       </div>

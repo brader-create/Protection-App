@@ -327,6 +327,7 @@ export default function App() {
           onChange={updateSetting}
           onReset={resetSettings}
           onClose={() => setSettingsOpen(false)}
+          essentialCount={essentialIds.size}
         />
       )}
 
