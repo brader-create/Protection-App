@@ -52,8 +52,15 @@ export const PDF_APPLIANCE_STYLES = [
   { key: 'condensed', label: 'Condensed', hint: 'Three across, takes a fraction of the space' },
 ];
 
+// How the appliance list on the home page is laid out.
+export const APPLIANCE_LAYOUTS = [
+  { key: 'rows', label: 'Rows', hint: 'One appliance per line' },
+  { key: 'cells', label: 'Cells', hint: 'Side by side, up to 4 across depending on how many' },
+];
+
 export const DEFAULT_SETTINGS = {
   homeMode: 'advanced',
+  applianceLayout: 'rows',
   pdfApplianceStyle: 'full',
   ...Object.fromEntries(PDF_COMPARE_OPTIONS.map((option) => [option.key, true])),
   // % of appliance cost, % per year and savings against Individual on the PDF.
@@ -73,6 +80,9 @@ export function loadSettings() {
     }
     if (!HOME_MODES.some((mode) => mode.key === settings.homeMode)) {
       settings.homeMode = DEFAULT_SETTINGS.homeMode;
+    }
+    if (!APPLIANCE_LAYOUTS.some((layout) => layout.key === settings.applianceLayout)) {
+      settings.applianceLayout = DEFAULT_SETTINGS.applianceLayout;
     }
     if (!PDF_APPLIANCE_STYLES.some((style) => style.key === settings.pdfApplianceStyle)) {
       settings.pdfApplianceStyle = DEFAULT_SETTINGS.pdfApplianceStyle;

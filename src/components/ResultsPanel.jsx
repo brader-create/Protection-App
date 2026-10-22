@@ -333,43 +333,91 @@ function ItemizedBreakdown({ items }) {
 }
 
 // Simple mode's breakdown: one line per kind of plan, e.g. "3+ Appliances ·
-// 10 models  $1,499.98", rather than every appliance in every group. Hovering a
-// line lists its models.
+// 10 models  $1,499.98", rather than every appliance in every group. Tap a
+// line to see what's in it: the models and their costs for a single plan, or
+// each plan's models and price when there are several of that kind.
 function CompactBreakdown({ items }) {
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (label) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    return next;
+  });
+
   const rows = [];
   for (const item of items) {
     const error = item.price === null;
     const label = error ? 'No Bracket' : item.groupLabel;
     let row = rows.find((r) => r.label === label);
     if (!row) {
-      row = { label, error, plans: 0, models: [], total: 0 };
+      row = { label, error, items: [], modelCount: 0, total: 0 };
       rows.push(row);
     }
-    row.plans += 1;
-    row.models.push(...item.appliances.map((a) => a.model));
+    row.items.push(item);
+    row.modelCount += item.appliances.length;
     row.total += item.price ?? 0;
   }
   rows.sort((a, b) => b.total - a.total);
 
   return (
-    <div className="space-y-1.5">
-      {rows.map((row) => (
-        <div key={row.label} className="flex items-center gap-2 text-xs" title={row.models.join(', ')}>
-          <span
-            className={row.error
-              ? 'text-[10px] font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded-full border border-red-500/20'
-              : 'badge-blue text-[10px]'}
-          >
-            {row.plans > 1 ? `${row.plans} × ` : ''}{row.label}
-          </span>
-          <span style={{ color: 'var(--text-faint)' }}>
-            {row.models.length} model{row.models.length === 1 ? '' : 's'}
-          </span>
-          <span className={`ml-auto tabular-nums font-semibold ${row.error ? 'text-red-400' : ''}`} style={!row.error ? { color: 'var(--text-primary)' } : {}}>
-            {row.error ? 'N/A' : formatPrice(row.total)}
-          </span>
-        </div>
-      ))}
+    <div className="space-y-1">
+      {rows.map((row) => {
+        const isOpen = open.has(row.label);
+        const plans = row.items.length;
+        return (
+          <div key={row.label}>
+            <button
+              type="button"
+              onClick={() => toggle(row.label)}
+              aria-expanded={isOpen}
+              title={isOpen ? 'Hide the models' : 'Show the models'}
+              className="w-full flex items-center gap-2 text-xs text-left rounded-md -mx-1 px-1 py-0.5 hover:bg-slate-500/10 transition-colors"
+            >
+              <span
+                className={row.error
+                  ? 'text-[10px] font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded-full border border-red-500/20'
+                  : 'badge-blue text-[10px]'}
+              >
+                {plans > 1 ? `${plans} × ` : ''}{row.label}
+              </span>
+              <span style={{ color: 'var(--text-faint)' }}>
+                {row.modelCount} model{row.modelCount === 1 ? '' : 's'}
+              </span>
+              <svg
+                className={`w-3 h-3 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                style={{ color: 'var(--text-faint)' }}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+              </svg>
+              <span className={`ml-auto tabular-nums font-semibold ${row.error ? 'text-red-400' : ''}`} style={!row.error ? { color: 'var(--text-primary)' } : {}}>
+                {row.error ? 'N/A' : formatPrice(row.total)}
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="mt-1 mb-1.5 ml-2 pl-2.5 border-l space-y-0.5 tabular-nums" style={{ borderColor: 'var(--border-main)' }}>
+                {plans === 1
+                  ? row.items[0].appliances.map((app) => (
+                      <div key={app.id} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="truncate" style={{ color: 'var(--text-muted)' }}>{app.model}</span>
+                        <span className="shrink-0" style={{ color: 'var(--text-faint)' }}>{formatPrice(app.cost)}</span>
+                      </div>
+                    ))
+                  : row.items.map((item, i) => (
+                      <div key={i} className="flex items-start justify-between gap-2 text-[11px]">
+                        <span style={{ color: 'var(--text-muted)' }}>{item.appliances.map((a) => a.model).join(' · ')}</span>
+                        <span className={`shrink-0 font-semibold ${item.price === null ? 'text-red-400' : ''}`} style={item.price !== null ? { color: 'var(--text-faint)' } : {}}>
+                          {item.price === null ? 'N/A' : formatPrice(item.price)}
+                        </span>
+                      </div>
+                    ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
