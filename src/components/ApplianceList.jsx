@@ -207,21 +207,24 @@ export default function ApplianceList({
         );
 
         if (cells) {
+          // A two-line tile: what it is and what it costs on top, then its
+          // description with the badges and actions tucked to the right.
           return (
-            <div key={app.id} className={`appliance-cell flex flex-col gap-1.5 rounded-xl px-3 py-2.5 transition-opacity ${isExcluded ? 'opacity-35' : ''}`}
+            <div key={app.id} className={`appliance-cell flex flex-col justify-center gap-1 rounded-xl px-3 py-2.5 transition-opacity ${isExcluded ? 'opacity-35' : ''}`}
               style={{ background: 'var(--bg-card-inner)', border: '1px solid var(--border-light)' }}
             >
               <div className="flex items-center gap-2 min-w-0">
                 {includeBox}
-                <span className="text-xs font-mono shrink-0" style={{ color: 'var(--text-faint)' }}>{index + 1}</span>
-                <div className="flex-1 min-w-0">{name}</div>
-                {star}
+                <div className="flex-1 min-w-0 text-sm">{name}</div>
+                <span className="text-sm">{cost}</span>
               </div>
-              {description && <div className="pl-6 min-w-0">{description}</div>}
-              <div className="flex items-center gap-1.5 pl-6 flex-wrap">
-                {smallBadge}
+              <div className="flex items-center gap-1 min-w-0 pl-6">
+                <div className="flex-1 min-w-0">
+                  {description || <span className="text-xs" style={{ color: 'var(--text-faint)' }}>No description</span>}
+                </div>
+                {app.isSmall && <span className="badge-amber text-[9px] !px-1.5 !py-0 shrink-0">Small</span>}
                 {save3Chip}
-                <span className="ml-auto">{cost}</span>
+                {star}
                 {editButton}
                 {removeButton}
               </div>

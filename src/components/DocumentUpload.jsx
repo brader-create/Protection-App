@@ -871,7 +871,7 @@ export default function DocumentUpload({ onParsedItems, mode = 'file' }) {
               'LG, RANGE, ELEC, S/C, SS (LREN6323YE) N/A 1 $1,163.98 $1,163.98\n\n' +
               'More than one page? Paste them one after another.'
             }
-            className="w-full rounded-xl bg-slate-900/60 border border-slate-700 focus:border-blue-500 focus:outline-none p-3 text-sm text-slate-200 placeholder:text-slate-600 font-mono resize-y"
+            className="input-field !p-3 text-sm font-mono resize-y"
           />
           <div className="flex items-center gap-3">
             <button onClick={handleReadPastedText} disabled={!pastedText.trim()} className="btn-primary text-sm py-2 disabled:opacity-40">

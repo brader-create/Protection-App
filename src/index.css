@@ -203,3 +203,76 @@
     animation: turbo-scan 1.2s ease-in-out infinite;
   }
 }
+
+/*
+ * Light mode colours.
+ *
+ * Much of the interface uses pale tints chosen to glow on the dark theme —
+ * amber-300, emerald-300/60, purple-300 and so on — which all but vanish on a
+ * white background. In light mode each is swapped for a deeper shade of the
+ * same colour, with the dimmed (/40–/80) variants a little lighter than the
+ * full ones so they still read as secondary.
+ *
+ * Unlayered on purpose: Tailwind's utilities live in a cascade layer, and
+ * unlayered rules win over layered ones whatever their specificity.
+ *
+ * Left alone: text-blue-200 (light text on the solid blue year tab),
+ * text-amber-500 (the sun icon), and the slate fills on native checkboxes.
+ */
+.light-mode .text-slate-200 { color: #1e293b; }
+.light-mode .text-slate-300 { color: #334155; }
+.light-mode .text-slate-400 { color: #64748b; }
+.light-mode .text-slate-600 { color: #94a3b8; }
+.light-mode .placeholder\:text-slate-600::placeholder { color: #94a3b8; }
+.light-mode .hover\:text-slate-200:hover { color: #0f172a; }
+.light-mode .hover\:text-slate-400:hover { color: #475569; }
+
+.light-mode .text-amber-200,
+.light-mode .text-amber-300 { color: #b45309; }
+.light-mode .text-amber-300\/50,
+.light-mode .text-amber-300\/60,
+.light-mode .text-amber-300\/70,
+.light-mode .text-amber-400\/70 { color: rgba(180, 83, 9, 0.8); }
+.light-mode .text-amber-400 { color: #d97706; }
+.light-mode .hover\:text-amber-400\/70:hover { color: #d97706; }
+
+.light-mode .text-emerald-300 { color: #047857; }
+.light-mode .text-emerald-400 { color: #059669; }
+.light-mode .text-emerald-300\/40,
+.light-mode .text-emerald-300\/60,
+.light-mode .text-emerald-300\/70 { color: rgba(4, 120, 87, 0.8); }
+
+.light-mode .text-blue-300 { color: #1d4ed8; }
+.light-mode .text-blue-400 { color: #2563eb; }
+
+.light-mode .text-cyan-300,
+.light-mode .text-cyan-400 { color: #0e7490; }
+
+.light-mode .text-purple-300 { color: #7e22ce; }
+.light-mode .text-purple-400 { color: #9333ea; }
+.light-mode .text-purple-300\/50,
+.light-mode .text-purple-300\/70 { color: rgba(126, 34, 206, 0.8); }
+
+.light-mode .text-red-300,
+.light-mode .text-red-400 { color: #dc2626; }
+.light-mode .text-red-400\/60,
+.light-mode .text-red-400\/70,
+.light-mode .text-red-400\/80 { color: rgba(220, 38, 38, 0.8); }
+.light-mode .hover\:text-red-300:hover,
+.light-mode .hover\:text-red-400:hover { color: #b91c1c; }
+
+/* Dark fills and borders that read as heavy grey blocks on white. */
+.light-mode .bg-slate-800\/50 { background-color: #f1f5f9; }
+.light-mode .bg-slate-600 { background-color: #cbd5e1; }
+.light-mode .border-slate-500 { border-color: #94a3b8; }
+.light-mode .border-slate-600 { border-color: #cbd5e1; }
+.light-mode .border-slate-700,
+.light-mode .border-slate-700\/30 { border-color: #e2e8f0; }
+.light-mode .hover\:border-slate-500:hover { border-color: #94a3b8; }
+
+/* Tinted chips and panels: plain rgb borders, a touch stronger than the dark
+   theme's so they still outline on white. */
+.light-mode .border-blue-500\/60 { border-color: rgba(37, 99, 235, 0.45); }
+.light-mode .border-amber-400\/60 { border-color: rgba(217, 119, 6, 0.55); }
+.light-mode .border-amber-500\/30 { border-color: rgba(217, 119, 6, 0.35); }
+.light-mode .border-emerald-500\/30 { border-color: rgba(5, 150, 105, 0.35); }
