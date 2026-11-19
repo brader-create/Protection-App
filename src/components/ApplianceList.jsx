@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PROMO_BADGES } from '../utils/holidayPromo';
 
 export default function ApplianceList({
   appliances,
@@ -12,6 +13,9 @@ export default function ApplianceList({
   essentialIds,
   onToggleEssential,
   layout = 'rows',
+  christmas = false,
+  promoYears = {},
+  onSetPromo,
 }) {
   const [editingId, setEditingId] = useState(null);
   const [editModel, setEditModel] = useState('');
@@ -135,6 +139,34 @@ export default function ApplianceList({
             title={isExcluded ? 'Include in calculation' : 'Exclude from calculation'}
           />
         );
+        // Christmas only: whether the model gets one or two additional years
+        // free under the holiday promotion. One or the other, or neither.
+        const freeYears = promoYears[app.id] || 0;
+        // In rows they stack on a phone, so the model name keeps its room.
+        const promoToggles = christmas && (
+          <div
+            className={`flex items-center gap-1 shrink-0 ${cells ? '' : 'flex-col sm:flex-row'}`}
+            role="group"
+            aria-label={`Holiday free years for ${app.model}`}
+          >
+            {[1, 2].map((level) => {
+              const on = freeYears === level;
+              const badge = PROMO_BADGES[level];
+              return (
+                <button
+                  key={level}
+                  onClick={() => onSetPromo(app.id, on ? 0 : level)}
+                  className={`promo-toggle promo-toggle-${level} ${on ? 'promo-toggle-on' : ''}`}
+                  aria-pressed={on}
+                  title={on ? `Gets ${badge.long} — click to remove` : `Qualifies for ${badge.long}`}
+                >
+                  <span className="promo-icon" aria-hidden="true">{badge.icon}</span>
+                  +{level}
+                </button>
+              );
+            })}
+          </div>
+        );
         const number = (
           <span className="text-sm font-mono w-6 text-right shrink-0" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
         );
@@ -219,8 +251,9 @@ export default function ApplianceList({
                 <span className="text-sm">{cost}</span>
               </div>
               <div className="flex items-center gap-1 min-w-0 pl-6">
+                {promoToggles && <div className="mr-1">{promoToggles}</div>}
                 <div className="flex-1 min-w-0">
-                  {description || <span className="text-xs" style={{ color: 'var(--text-faint)' }}>No description</span>}
+                  {description || <span className="text-xs truncate block" style={{ color: 'var(--text-faint)' }}>No description</span>}
                 </div>
                 {app.isSmall && <span className="badge-amber text-[9px] !px-1.5 !py-0 shrink-0">Small</span>}
                 {save3Chip}
@@ -235,6 +268,7 @@ export default function ApplianceList({
         return (
           <div key={app.id} className={`appliance-row transition-opacity ${isExcluded ? 'opacity-35' : ''}`}>
             {includeBox}
+            {promoToggles}
             {number}
             <div className="flex-1 min-w-0">
               {name}

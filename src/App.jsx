@@ -4,6 +4,7 @@ import ApplianceList from './components/ApplianceList';
 import DocumentUpload from './components/DocumentUpload';
 import ResultsPanel from './components/ResultsPanel';
 import SettingsPanel from './components/SettingsPanel';
+import HolidayPanel from './components/HolidayPanel';
 import { calculateAll } from './utils/calculator';
 import { warmPdfEngine } from './utils/pdfEngine';
 import { WARRANTY_YEARS } from './data/warrantyPricing';
@@ -23,6 +24,14 @@ export default function App() {
   const [lightMode, setLightMode] = useState(() => {
     try { return localStorage.getItem('wlc-theme') === 'light'; } catch { return false; }
   });
+  // Christmas: the festive theme and the holiday promotion pricing, together.
+  const [christmas, setChristmas] = useState(() => {
+    try { return localStorage.getItem('wlc-christmas') === 'on'; } catch { return false; }
+  });
+  // Free additional years per model under the holiday promotion (1 or 2),
+  // marked by hand. Kept while Christmas is off, so turning it back on
+  // brings the marks back.
+  const [promoYears, setPromoYears] = useState({});
 
   // Progressive results: built year-by-year
   const [normalByYear, setNormalByYear] = useState({});
@@ -78,11 +87,29 @@ export default function App() {
     });
   }, []);
 
+  const setPromo = useCallback((id, level) => {
+    setPromoYears((prev) => {
+      const next = { ...prev };
+      if (level) next[id] = level;
+      else delete next[id];
+      return next;
+    });
+  }, []);
+
   // Theme toggle
   useEffect(() => {
     document.documentElement.classList.toggle('light-mode', lightMode);
     try { localStorage.setItem('wlc-theme', lightMode ? 'light' : 'dark'); } catch {}
   }, [lightMode]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('christmas', christmas);
+    try {
+      localStorage.setItem('wlc-christmas', christmas ? 'on' : 'off');
+    } catch {
+      // Storage can be unavailable; the theme still applies for this visit.
+    }
+  }, [christmas]);
 
   // Separate memos so pregenerate doesn't cause re-renders when save3 is off
   const normalResults = useMemo(() => {
@@ -119,6 +146,7 @@ export default function App() {
     setExcludedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     setSave3Exclusions((prev) => { const n = new Set(prev); n.delete(id); return n; });
     setEssentialIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    setPromo(id, 0);
     clearResults();
   }
 
@@ -137,6 +165,7 @@ export default function App() {
     setExcludedIds(new Set());
     setSave3Exclusions(new Set());
     setEssentialIds(new Set());
+    setPromoYears({});
     clearResults();
   }
 
@@ -284,12 +313,13 @@ export default function App() {
   const activeCount = appliances.filter((a) => !excludedIds.has(a.id)).length;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-base)' }}>
+    <div className="min-h-screen relative" style={{ backgroundColor: 'var(--bg-base)' }}>
+      {christmas && <div className="snowfall" aria-hidden="true" />}
       {/* Header */}
-      <header className="border-b backdrop-blur-sm sticky top-0 z-50" style={{ borderColor: 'var(--border-main)', backgroundColor: 'var(--bg-base)' }}>
+      <header className="app-header border-b backdrop-blur-sm sticky top-0 z-50" style={{ borderColor: 'var(--border-main)', backgroundColor: 'var(--bg-base)' }}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+            <div className="app-logo w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
@@ -301,11 +331,26 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Brads Handy Dandy Protection Calculator</h1>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Warranty List Options 6.01</p>
+              <p className="text-xs flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+                Warranty List Options 6.01
+                {christmas && <span className="holiday-pill">Holiday pricing on</span>}
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+          {/* Christmas: festive theme and holiday promotion pricing together */}
+          <button
+            onClick={() => setChristmas(!christmas)}
+            className={`christmas-toggle p-2.5 rounded-xl transition-all duration-200 hover:scale-105 ${christmas ? 'christmas-toggle-on' : ''}`}
+            style={christmas ? undefined : { background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)' }}
+            title={christmas ? 'Turn off the Christmas theme and holiday pricing' : 'Christmas theme and holiday pricing'}
+            aria-pressed={christmas}
+          >
+            <span className="block w-5 h-5 text-[17px] leading-5 text-center" aria-hidden="true">🎄</span>
+            <span className="sr-only">Christmas theme and holiday pricing</span>
+          </button>
+
           <button
             onClick={() => setSettingsOpen(true)}
             className="p-2.5 rounded-xl transition-all duration-200 hover:scale-105"
@@ -349,7 +394,7 @@ export default function App() {
         />
       )}
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+      <main className="relative z-[1] max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* Input Section */}
         <div className="card">
           <div className="card-header flex items-center justify-between">
@@ -428,6 +473,9 @@ export default function App() {
               essentialIds={essentialIds}
               onToggleEssential={toggleEssential}
               layout={settings.applianceLayout}
+              christmas={christmas}
+              promoYears={promoYears}
+              onSetPromo={setPromo}
             />
           </div>
         </div>
@@ -479,11 +527,23 @@ export default function App() {
           </button>
         </div>
 
+        {/* Holiday promotion, above the regular pricing */}
+        {christmas && allResults && (
+          <HolidayPanel
+            allResults={allResults}
+            promoYears={promoYears}
+            calculating={calculating}
+            activeYear={activeYear}
+            onYearChange={setActiveYear}
+          />
+        )}
+
         {/* Results */}
         {allResults && (
           <div className="card">
             <div className="card-body">
               <ResultsPanel
+                title={christmas ? 'Regular Pricing (without the holiday promotion)' : undefined}
                 allResults={allResults}
                 activeYear={activeYear}
                 onYearChange={setActiveYear}
@@ -501,7 +561,7 @@ export default function App() {
         )}
       </main>
 
-      <footer className="border-t mt-12 py-6" style={{ borderColor: 'var(--border-main)' }}>
+      <footer className="relative z-[1] border-t mt-12 py-6" style={{ borderColor: 'var(--border-main)' }}>
         <p className="text-center text-sm" style={{ color: 'var(--text-faint)' }}>Brads Handy Dandy Protection Calculator — Warranty List Options 6.01</p>
       </footer>
     </div>
