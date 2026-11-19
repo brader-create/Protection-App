@@ -276,3 +276,212 @@
 .light-mode .border-amber-400\/60 { border-color: rgba(217, 119, 6, 0.55); }
 .light-mode .border-amber-500\/30 { border-color: rgba(217, 119, 6, 0.35); }
 .light-mode .border-emerald-500\/30 { border-color: rgba(5, 150, 105, 0.35); }
+
+/*
+ * Christmas: the festive theme that comes on with the holiday pricing (the 🎄
+ * button). It sits over dark or light mode: deep pine or frosty white, red in
+ * place of the blue accents, a candy-cane stripe under the header and gently
+ * falling snow behind the page. Unlayered, like the light-mode colours above.
+ */
+.christmas {
+  --bg-base: #061510;
+  --bg-card: rgba(10, 30, 22, 0.82);
+  --bg-card-inner: rgba(24, 56, 42, 0.5);
+  --bg-input: rgba(24, 56, 42, 0.8);
+  --border-main: rgba(64, 110, 86, 0.45);
+  --border-light: rgba(64, 110, 86, 0.28);
+  --text-primary: #f2f7f4;
+  --text-secondary: #a3bdb0;
+  --text-muted: #7a9a8b;
+  --text-faint: #557566;
+  --snow: rgba(255, 255, 255, 0.85);
+  --xmas-green-text: #4ade80;
+  --xmas-red-text: #f87171;
+}
+.christmas.light-mode {
+  --bg-base: #eaf1ee;
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --bg-card-inner: rgba(246, 249, 247, 0.95);
+  --bg-input: rgba(246, 249, 247, 0.95);
+  --border-main: rgba(176, 200, 188, 0.8);
+  --border-light: rgba(176, 200, 188, 0.5);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #5b6b66;
+  --text-faint: #8fa39b;
+  --snow: rgba(100, 130, 150, 0.4);
+  --xmas-green-text: #15803d;
+  --xmas-red-text: #b91c1c;
+}
+
+.snowfall {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 20px 30px, var(--snow) 1.5px, transparent 2.5px),
+    radial-gradient(circle at 130px 90px, var(--snow) 1px, transparent 2px),
+    radial-gradient(circle at 70px 150px, var(--snow) 2px, transparent 3px),
+    radial-gradient(circle at 190px 210px, var(--snow) 1px, transparent 2px);
+  background-size: 180px 180px, 240px 240px, 300px 300px, 260px 260px;
+  opacity: 0.6;
+  animation: snowfall 24s linear infinite;
+}
+@keyframes snowfall {
+  from { background-position: 0 0, 0 0, 0 0, 0 0; }
+  to { background-position: 0 180px, 0 240px, 0 300px, 0 260px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snowfall { animation: none; }
+}
+
+.christmas .app-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 5px;
+  background: repeating-linear-gradient(-45deg, #dc2626 0 10px, #ffffff 10px 20px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+.christmas .app-logo {
+  background-image: linear-gradient(135deg, #dc2626, #166534);
+  box-shadow: 0 10px 15px -3px rgba(220, 38, 38, 0.3);
+}
+
+.christmas-toggle-on {
+  background: linear-gradient(135deg, #b91c1c, #15803d);
+  border: 1px solid #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25), 0 6px 16px rgba(185, 28, 28, 0.35);
+}
+.holiday-pill {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  color: #ffffff;
+  background: linear-gradient(90deg, #b91c1c, #15803d);
+}
+
+/* Blue accents turn Christmas red (and the input tabs pine green). */
+.christmas .btn-primary {
+  background-color: #b91c1c;
+  background-image: linear-gradient(135deg, #dc2626, #991b1b);
+  box-shadow: 0 10px 15px -3px rgba(185, 28, 28, 0.35);
+}
+.christmas .btn-primary:hover:not(:disabled) {
+  background-image: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+.christmas .tab-button-active {
+  background-color: #15803d;
+  box-shadow: 0 10px 15px -3px rgba(21, 128, 61, 0.3);
+}
+.christmas .bg-blue-600 { background-color: #b91c1c; }
+.christmas .text-blue-200 { color: #fecaca; }
+.christmas .accent-blue-500 { accent-color: #16a34a; }
+
+/* The +1 / +2 free-year toggles on each model. */
+.promo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 9999px;
+  border: 1px dashed var(--border-main);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.promo-toggle .promo-icon {
+  font-size: 11px;
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.promo-toggle:hover { color: var(--text-secondary); border-style: solid; }
+.promo-toggle:hover .promo-icon { opacity: 0.8; }
+.promo-toggle-on { border-style: solid; }
+.promo-toggle-on .promo-icon { filter: none; opacity: 1; }
+
+.promo-toggle-1.promo-toggle-on,
+.promo-chip-1 {
+  background: rgba(22, 163, 74, 0.2);
+  border-color: rgba(74, 222, 128, 0.55);
+  color: #86efac;
+}
+.promo-toggle-2.promo-toggle-on,
+.promo-chip-2 {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fca5a5;
+}
+.light-mode .promo-toggle-1.promo-toggle-on,
+.light-mode .promo-chip-1 { background: #dcfce7; border-color: #86efac; color: #15803d; }
+.light-mode .promo-toggle-2.promo-toggle-on,
+.light-mode .promo-chip-2 { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; }
+
+.promo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  border: 1px solid;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* The holiday results panel. */
+.holiday-card {
+  border-color: rgba(220, 38, 38, 0.45);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12), 0 20px 25px -5px rgba(0, 0, 0, 0.25);
+}
+.holiday-stripe {
+  height: 6px;
+  background: repeating-linear-gradient(-45deg, #dc2626 0 10px, #ffffff 10px 20px);
+}
+.holiday-term {
+  background: var(--bg-card-inner);
+  border: 1px solid var(--border-main);
+}
+.holiday-term-selected {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 1px #dc2626, 0 8px 20px -6px rgba(220, 38, 38, 0.35);
+  background: linear-gradient(180deg, rgba(220, 38, 38, 0.12), transparent 70%), var(--bg-card-inner);
+}
+.holiday-section {
+  background: var(--bg-card-inner);
+  border: 1px solid var(--border-light);
+}
+.holiday-total,
+.holiday-free { color: var(--xmas-green-text, #4ade80); }
+.holiday-rebate { color: var(--xmas-red-text, #f87171); }
+
+/* Download Christmas PDF: candy-striped red with a gold edge. */
+.btn-christmas {
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 12px;
+  color: #ffffff;
+  background: repeating-linear-gradient(-45deg, #b91c1c 0 12px, #9f1717 12px 24px);
+  border: 1px solid #fbbf24;
+  box-shadow: 0 6px 16px -4px rgba(185, 28, 28, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+.btn-christmas:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px -4px rgba(185, 28, 28, 0.6);
+}
+.btn-christmas:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

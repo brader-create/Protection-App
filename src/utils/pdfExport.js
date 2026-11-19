@@ -16,19 +16,19 @@ const COMPARE_SETTING = {
   individual: 'pdfCompareIndividual',
 };
 
-const PAGE_WIDTH = 210;
-const A4_HEIGHT = 297;
-const MARGIN = 15;
-const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+export const PAGE_WIDTH = 210;
+export const A4_HEIGHT = 297;
+export const MARGIN = 15;
+export const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 // Content stops this far above the bottom of the page, leaving room for the
 // footer line.
-const FOOTER_SPACE = 17;
+export const FOOTER_SPACE = 17;
 
 // Sizes tried, largest first, until the page fits. 1 is the full-size layout;
 // below the last the type gets too small to read comfortably.
-const DENSITIES = [1, 0.93, 0.86, 0.8, 0.74, 0.68, 0.62, 0.57, 0.52, 0.48];
+export const DENSITIES = [1, 0.93, 0.86, 0.8, 0.74, 0.68, 0.62, 0.57, 0.52, 0.48];
 
-const COLOR = {
+export const COLOR = {
   ink: [30, 41, 59],
   muted: [100, 116, 139],
   faint: [148, 163, 184],
@@ -46,7 +46,7 @@ const COLOR = {
 // The terms are years added on top of the manufacturer's warranty.
 const termLabel = (yr) => `${yr}-Year Additional`;
 
-function formatPrice(price) {
+export function formatPrice(price) {
   if (price === null || price === undefined) return '—';
   return '$' + price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -177,7 +177,7 @@ function measure(data, layout) {
   return draw(scratch, data, layout);
 }
 
-function metricsFor(d) {
+export function metricsFor(d) {
   return {
     headerHeight: 38 * Math.max(0.7, d),
     titleFont: 18 * Math.max(0.75, d),
@@ -201,15 +201,15 @@ function metricsFor(d) {
 }
 
 // Line height in mm for a font size in points.
-const lineHeight = (pt) => pt * 0.3528 * 1.25;
+export const lineHeight = (pt) => pt * 0.3528 * 1.25;
 
 // Draw a table and return where it ends.
-function table(doc, options) {
+export function table(doc, options) {
   const result = autoTable(doc, options);
   return result?.finalY ?? doc.lastAutoTable?.finalY ?? options.startY;
 }
 
-function sectionTitle(doc, m, title, y, { note, color = COLOR.ink, size = m.sectionFont } = {}) {
+export function sectionTitle(doc, m, title, y, { note, color = COLOR.ink, size = m.sectionFont } = {}) {
   doc.setTextColor(...color);
   doc.setFontSize(size);
   doc.setFont('helvetica', 'bold');
