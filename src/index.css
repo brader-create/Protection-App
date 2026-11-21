@@ -631,44 +631,32 @@
 }
 .christmas .app-footer p { color: #475569 !important; }
 
-/* --- The 🎄 button while the theme is off: a light that circles it --- */
-@property --xmas-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
+/* --- The 🎄 button while the theme is off: tiny twinkling lights on its
+   edge, each fading slowly in and out on its own --- */
 .christmas-toggle-idle {
   position: relative;
 }
-.christmas-toggle-idle::before {
-  content: '';
+.toggle-lights {
   position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 2px;
+  inset: 0;
   pointer-events: none;
-  background: conic-gradient(
-    from var(--xmas-angle),
-    transparent 0deg 230deg,
-    rgba(250, 204, 21, 0.95) 280deg,
-    rgba(239, 68, 68, 0.95) 315deg,
-    rgba(34, 197, 94, 0.95) 345deg,
-    transparent 360deg
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: xmas-orbit 3s linear infinite;
 }
-.christmas-toggle-idle span[aria-hidden] {
-  animation: xmas-tree-glint 3s ease-in-out infinite;
+.toggle-lights i {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bulb);
+  opacity: 0.35;
+  animation: toggle-twinkle 3.2s ease-in-out infinite;
 }
-@keyframes xmas-orbit {
-  to { --xmas-angle: 360deg; }
-}
-@keyframes xmas-tree-glint {
-  0%, 70%, 100% { filter: none; }
-  80% { filter: drop-shadow(0 0 4px rgba(250, 204, 21, 0.9)) brightness(1.15); }
+.toggle-bulb-red { --bulb: #ef4444; --glow: rgba(239, 68, 68, 0.75); }
+.toggle-bulb-green { --bulb: #22c55e; --glow: rgba(34, 197, 94, 0.75); }
+.toggle-bulb-gold { --bulb: #fbbf24; --glow: rgba(251, 191, 36, 0.8); }
+@keyframes toggle-twinkle {
+  0%, 100% { opacity: 0.35; box-shadow: none; }
+  50% { opacity: 1; box-shadow: 0 0 4px 1px var(--glow); }
 }
 
 /* --- A wreath around the Best Mix card --- */
@@ -717,10 +705,9 @@
   .xmas-bulb,
   .scene-light,
   .scene-smoke,
-  .christmas-toggle-idle span[aria-hidden],
   .christmas .btn-primary:hover:not(:disabled) { animation: none; }
-  .christmas-toggle-idle::before {
+  .toggle-lights i {
     animation: none;
-    background: rgba(250, 204, 21, 0.7);
+    opacity: 0.9;
   }
 }
