@@ -87,30 +87,16 @@ export const PRICING = {
   ],
 };
 
-// One additional year (6.01, "1 Appliance +1 Year") is sold on single
-// appliances only, so it isn't one of the regular terms. The holiday promotion
-// uses it. Prices follow the 1 Appliance brackets above, in the same order.
-const ONE_YEAR_SINGLE = [
-  99.98, 119.98, 119.98, 119.98, 129.98, 149.98, 169.98,
-  189.98, 209.98, 259.98, 369.98, 409.98, 529.98, 699.98,
-];
-
 /**
  * Look up warranty price for a group type, total cost of appliances, and year term.
  * @param {string} groupType - One of GROUP_TYPES values
  * @param {number} totalCost - Combined cost of all appliances in the group
- * @param {number} years - 2, 3, or 4; or 1 for a single appliance
+ * @param {number} years - 2, 3, or 4
  * @returns {number|null} - Price or null if no bracket matches
  */
 export function lookupPrice(groupType, totalCost, years) {
   const brackets = PRICING[groupType];
   if (!brackets) return null;
-
-  if (years === 1) {
-    if (groupType !== GROUP_TYPES.SINGLE) return null;
-    const i = brackets.findIndex(([min, max]) => totalCost >= min && totalCost <= max);
-    return i === -1 ? null : ONE_YEAR_SINGLE[i];
-  }
 
   const yearIndex = WARRANTY_YEARS.indexOf(years);
   if (yearIndex === -1) return null;
