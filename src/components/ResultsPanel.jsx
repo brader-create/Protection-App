@@ -872,7 +872,7 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
   );
 }
 
-export default function ResultsPanel({ title = 'Warranty Pricing Comparison', allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances, settings = {}, essentialIds, onToggleEssential }) {
+export default function ResultsPanel({ allResults, activeYear, onYearChange, appliances, save3Active, calculating, excludedIds, allAppliances, settings = {}, essentialIds, onToggleEssential }) {
   const visibility = homeVisibility(settings.homeMode);
   const show = (key) => visibility[key] !== false;
   const visibleCards = ['bestMixCard', 'singleBundleCard', 'individualCard'].filter(show).length;
@@ -1041,7 +1041,7 @@ export default function ResultsPanel({ title = 'Warranty Pricing Comparison', al
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
+        <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Warranty Pricing Comparison</h2>
         <div className="flex items-center gap-2">
           {appliances && appliances.length > 0 && (
             <>
