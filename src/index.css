@@ -597,10 +597,12 @@
   line-height: 0;
   pointer-events: none;
 }
+/* Tall enough at any width to show the whole height of the 2400 × 190
+   scene, so treetops are never cut off; the sides crop instead. */
 .winter-scene svg {
   display: block;
   width: 100%;
-  height: 170px;
+  height: max(170px, 7.92vw);
 }
 .scene-far { fill: var(--scene-far); }
 .scene-near { fill: var(--scene-near); }
@@ -629,6 +631,85 @@
 }
 .christmas .app-footer p { color: #475569 !important; }
 
+/* --- The 🎄 button while the theme is off: a light that circles it --- */
+@property --xmas-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.christmas-toggle-idle {
+  position: relative;
+}
+.christmas-toggle-idle::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 2px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--xmas-angle),
+    transparent 0deg 230deg,
+    rgba(250, 204, 21, 0.95) 280deg,
+    rgba(239, 68, 68, 0.95) 315deg,
+    rgba(34, 197, 94, 0.95) 345deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: xmas-orbit 3s linear infinite;
+}
+.christmas-toggle-idle span[aria-hidden] {
+  animation: xmas-tree-glint 3s ease-in-out infinite;
+}
+@keyframes xmas-orbit {
+  to { --xmas-angle: 360deg; }
+}
+@keyframes xmas-tree-glint {
+  0%, 70%, 100% { filter: none; }
+  80% { filter: drop-shadow(0 0 4px rgba(250, 204, 21, 0.9)) brightness(1.15); }
+}
+
+/* --- A wreath around the Best Mix card --- */
+.xmas-wreath,
+.xmas-bow { display: none; }
+
+/* A ring of pine with berries, inside the card's padding so it never
+   covers the figures. */
+.christmas .xmas-wreath {
+  display: block;
+  position: absolute;
+  inset: 3px;
+  border-radius: 13px;
+  padding: 8px;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(circle at 30% 40%, #ef4444 0 2.2px, transparent 2.8px) 0 0 / 26px 26px,
+    radial-gradient(circle at 70% 65%, #dc2626 0 1.9px, transparent 2.5px) 9px 5px / 34px 34px,
+    radial-gradient(circle at 50% 50%, #facc15 0 1.2px, transparent 1.7px) 4px 12px / 41px 37px,
+    radial-gradient(ellipse 6px 2.8px at 50% 50%, #22c55e 92%, transparent) 2px 6px / 12px 11px,
+    radial-gradient(ellipse 6px 3px at 50% 50%, #15803d 92%, transparent) 0 0 / 10px 9px,
+    radial-gradient(ellipse 3px 6px at 50% 50%, #166534 92%, transparent) 5px 4px / 10px 9px,
+    #14532d;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.christmas .xmas-bow {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 46px;
+  height: 33px;
+  margin-left: -23px;
+  pointer-events: none;
+  z-index: 2;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+}
+
 /* Still pictures for anyone who asks for less motion. */
 @media (prefers-reduced-motion: reduce) {
   .xmas-flake { display: none; }
@@ -636,5 +717,10 @@
   .xmas-bulb,
   .scene-light,
   .scene-smoke,
+  .christmas-toggle-idle span[aria-hidden],
   .christmas .btn-primary:hover:not(:disabled) { animation: none; }
+  .christmas-toggle-idle::before {
+    animation: none;
+    background: rgba(250, 204, 21, 0.7);
+  }
 }

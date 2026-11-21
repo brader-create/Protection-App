@@ -3,6 +3,7 @@ import { WARRANTY_YEARS, lookupPrice, GROUP_TYPES, getBracket, PRICING } from '.
 import { generateComparisonPDF } from '../utils/pdfExport';
 import { analyzeBracketProximity, calculateAll, calculateIndividual } from '../utils/calculator';
 import { homeVisibility } from '../utils/displaySettings';
+import { ChristmasBow } from './ChristmasDecor';
 
 function formatPrice(price) {
   if (price === null || price === undefined) return '—';
@@ -613,6 +614,10 @@ function BestMixCard({ result, cheapestPrice, originalResult, save3Active, years
 
   return (
     <div className={`result-card relative overflow-hidden ${displayIsBest ? 'result-card-best border-emerald-500/40' : ''} ${turboActive ? 'turbo-active' : ''}`}>
+      {/* A wreath and bow, shown only with the Christmas theme */}
+      <span className="xmas-wreath" aria-hidden="true" />
+      <ChristmasBow />
+
       {/* Turbo active subtle bolt in background */}
       {turboActive && !turboLoading && (
         <div className="absolute top-2 left-2 turbo-bolt pointer-events-none">

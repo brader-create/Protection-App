@@ -330,7 +330,7 @@ export default function App() {
           {/* Christmas theme */}
           <button
             onClick={() => setChristmas(!christmas)}
-            className={`christmas-toggle p-2.5 rounded-xl transition-all duration-200 hover:scale-105 ${christmas ? 'christmas-toggle-on' : ''}`}
+            className={`christmas-toggle p-2.5 rounded-xl transition-all duration-200 hover:scale-105 ${christmas ? 'christmas-toggle-on' : 'christmas-toggle-idle'}`}
             style={christmas ? undefined : { background: 'var(--bg-card-inner)', border: '1px solid var(--border-main)' }}
             title={christmas ? 'Turn off the Christmas theme' : 'Christmas theme'}
             aria-pressed={christmas}
