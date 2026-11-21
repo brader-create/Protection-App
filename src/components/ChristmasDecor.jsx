@@ -92,6 +92,35 @@ export function ChristmasLights() {
   );
 }
 
+// Bulbs around the edge of the 🎄 button, clockwise from the top: two on each
+// side and one on each rounded corner, as % of the button. The delays are
+// uneven so they never blink in step.
+const TOGGLE_BULBS = [
+  [35, 0, 'red', 0], [65, 0, 'gold', 1.4],
+  [91.5, 8.5, 'green', 0.5],
+  [100, 35, 'red', 2.3], [100, 65, 'gold', 0.9],
+  [91.5, 91.5, 'green', 2.8],
+  [65, 100, 'red', 1.6], [35, 100, 'gold', 0.2],
+  [8.5, 91.5, 'green', 2.0],
+  [0, 65, 'red', 0.7], [0, 35, 'gold', 2.5],
+  [8.5, 8.5, 'green', 1.1],
+];
+
+/** Tiny twinkling lights around the 🎄 button while the theme is off. */
+export function ToggleLights() {
+  return (
+    <span className="toggle-lights" aria-hidden="true">
+      {TOGGLE_BULBS.map(([x, y, color, delay], i) => (
+        <i
+          key={i}
+          className={`toggle-bulb-${color}`}
+          style={{ left: `${x}%`, top: `${y}%`, animationDelay: `${delay}s` }}
+        />
+      ))}
+    </span>
+  );
+}
+
 /** A Santa hat perched on the logo. */
 export function SantaHat() {
   return (

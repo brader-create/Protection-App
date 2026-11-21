@@ -4,7 +4,7 @@ import ApplianceList from './components/ApplianceList';
 import DocumentUpload from './components/DocumentUpload';
 import ResultsPanel from './components/ResultsPanel';
 import SettingsPanel from './components/SettingsPanel';
-import { ChristmasBackdrop, ChristmasLights, ChristmasCountdown, SantaHat, WinterScene } from './components/ChristmasDecor';
+import { ChristmasBackdrop, ChristmasLights, ChristmasCountdown, SantaHat, ToggleLights, WinterScene } from './components/ChristmasDecor';
 import { calculateAll } from './utils/calculator';
 import { warmPdfEngine } from './utils/pdfEngine';
 import { WARRANTY_YEARS } from './data/warrantyPricing';
@@ -335,6 +335,7 @@ export default function App() {
             title={christmas ? 'Turn off the Christmas theme' : 'Christmas theme'}
             aria-pressed={christmas}
           >
+            {!christmas && <ToggleLights />}
             <span className="block w-5 h-5 text-[17px] leading-5 text-center" aria-hidden="true">🎄</span>
             <span className="sr-only">Christmas theme</span>
           </button>
